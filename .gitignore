@@ -32,3 +32,6 @@ yarn-error.log*
 # Turbo
 .turbo
 /.vs
+
+# Local scratch (not committed)
+Temp/
