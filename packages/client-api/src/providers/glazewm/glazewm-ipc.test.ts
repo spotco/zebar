@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { TilingDirection } from 'glazewm';
 
 import {
   DEFAULT_GLAZEWM_IPC_PORT,
@@ -8,6 +9,34 @@ import {
   normalizeGlazeWmIpcPort,
   parseGlazeWmIpcPortContents,
 } from './glazewm-ipc.ts';
+import { resolveGlazeWmTilingDirectionState } from './glazewm-provider-types.ts';
+
+describe('resolveGlazeWmTilingDirectionState', () => {
+  it('keeps local and global directions independent', () => {
+    assert.deepEqual(
+      resolveGlazeWmTilingDirectionState({
+        tilingDirection: TilingDirection.VERTICAL,
+        globalTilingDirection: TilingDirection.HORIZONTAL,
+      }),
+      {
+        tilingDirection: TilingDirection.VERTICAL,
+        globalTilingDirection: TilingDirection.HORIZONTAL,
+      },
+    );
+  });
+
+  it('falls back to the local direction for older WM responses', () => {
+    assert.deepEqual(
+      resolveGlazeWmTilingDirectionState({
+        tilingDirection: TilingDirection.VERTICAL,
+      }),
+      {
+        tilingDirection: TilingDirection.VERTICAL,
+        globalTilingDirection: TilingDirection.VERTICAL,
+      },
+    );
+  });
+});
 
 describe('parseGlazeWmIpcPortContents', () => {
   it('parses 6123', () => {

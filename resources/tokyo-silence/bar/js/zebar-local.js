@@ -6770,6 +6770,14 @@ var WmEventType = /* @__PURE__ */ ((WmEventType2) => {
   return WmEventType2;
 })(WmEventType || {});
 
+// src/providers/glazewm/glazewm-provider-types.ts
+function resolveGlazeWmTilingDirectionState(tiling) {
+  return {
+    tilingDirection: tiling.tilingDirection,
+    globalTilingDirection: tiling.globalTilingDirection ?? tiling.tilingDirection
+  };
+}
+
 // src/providers/create-base-provider.ts
 function createBaseProvider(config, fetcher) {
   const logger2 = createLogger(config.type);
@@ -13268,21 +13276,17 @@ function createGlazeWmProvider(config) {
               if (!isActive(gen) || client !== next) {
                 return;
               }
-              const tiling = await next.queryTilingDirection();
+              const tilingState = await getTilingDirectionState();
               if (!isActive(gen) || client !== next) {
                 return;
               }
-              const globalTilingDirection = tiling.globalTilingDirection ?? tiling.tilingDirection;
-              state = {
-                ...state,
-                tilingDirection: globalTilingDirection,
-                globalTilingDirection
-              };
+              state = { ...state, ...tilingState };
               break;
             }
             case WmEventType.FOCUSED_CONTAINER_MOVED: {
               state = { ...state, focusedContainer: e.focusedContainer };
               state = { ...state, ...await getMonitorState() };
+              state = { ...state, ...await getTilingDirectionState() };
               break;
             }
             case WmEventType.TILING_DIRECTION_CHANGED: {
@@ -13297,7 +13301,6 @@ function createGlazeWmProvider(config) {
               if (raw.eventType === "global_tiling_direction_changed" && raw.newTilingDirection) {
                 state = {
                   ...state,
-                  tilingDirection: raw.newTilingDirection,
                   globalTilingDirection: raw.newTilingDirection
                 };
               }
@@ -13307,6 +13310,7 @@ function createGlazeWmProvider(config) {
             case WmEventType.WORKSPACE_DEACTIVATED:
             case WmEventType.WORKSPACE_UPDATED: {
               state = { ...state, ...await getMonitorState() };
+              state = { ...state, ...await getTilingDirectionState() };
               break;
             }
             case WmEventType.PAUSE_CHANGED: {
@@ -13325,18 +13329,21 @@ function createGlazeWmProvider(config) {
         async function getInitialState() {
           const { focused: focusedContainer } = await next.queryFocused();
           const { bindingModes } = await next.queryBindingModes();
-          const tiling = await next.queryTilingDirection();
-          const globalTilingDirection = tiling.globalTilingDirection ?? tiling.tilingDirection;
           const isPaused = await getIsPaused();
           return {
             ...await getMonitorState(),
             focusedContainer,
-            tilingDirection: globalTilingDirection,
-            globalTilingDirection,
+            ...await getTilingDirectionState(),
             bindingModes,
             isPaused,
             runCommand
           };
+        }
+        async function getTilingDirectionState() {
+          const tiling = await next.queryTilingDirection();
+          return resolveGlazeWmTilingDirectionState(
+            tiling
+          );
         }
         async function getIsPaused() {
           try {
@@ -13923,6 +13930,7 @@ export {
   createProvider,
   createProviderGroup,
   currentWidget,
+  resolveGlazeWmTilingDirectionState,
   shellExec2 as shellExec,
   shellSpawn2 as shellSpawn,
   startWidget2 as startWidget,

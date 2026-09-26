@@ -14,6 +14,7 @@ import type {
   GlazeWmProvider,
   GlazeWmProviderConfig,
 } from './glazewm-provider-types';
+import { resolveGlazeWmTilingDirectionState } from './glazewm-provider-types';
 import {
   DEFAULT_GLAZEWM_IPC_PORT,
   GLAZEWM_REDISCOVERY_DELAYS_MS,
@@ -135,23 +136,17 @@ export function createGlazeWmProvider(
                 return;
               }
 
-              const tiling = await next.queryTilingDirection();
+              const tilingState = await getTilingDirectionState();
               if (!isActive(gen) || client !== next) {
                 return;
               }
-              const globalTilingDirection =
-                (tiling as { globalTilingDirection?: typeof tiling.tilingDirection })
-                  .globalTilingDirection ?? tiling.tilingDirection;
-              state = {
-                ...state,
-                tilingDirection: globalTilingDirection,
-                globalTilingDirection,
-              };
+              state = { ...state, ...tilingState };
               break;
             }
             case WmEventType.FOCUSED_CONTAINER_MOVED: {
               state = { ...state, focusedContainer: e.focusedContainer };
               state = { ...state, ...(await getMonitorState()) };
+              state = { ...state, ...(await getTilingDirectionState()) };
               break;
             }
             case WmEventType.TILING_DIRECTION_CHANGED: {
@@ -172,7 +167,6 @@ export function createGlazeWmProvider(
               ) {
                 state = {
                   ...state,
-                  tilingDirection: raw.newTilingDirection,
                   globalTilingDirection: raw.newTilingDirection,
                 };
               }
@@ -182,6 +176,7 @@ export function createGlazeWmProvider(
             case WmEventType.WORKSPACE_DEACTIVATED:
             case WmEventType.WORKSPACE_UPDATED: {
               state = { ...state, ...(await getMonitorState()) };
+              state = { ...state, ...(await getTilingDirectionState()) };
               break;
             }
             case WmEventType.PAUSE_CHANGED: {
@@ -206,21 +201,25 @@ export function createGlazeWmProvider(
         async function getInitialState() {
           const { focused: focusedContainer } = await next.queryFocused();
           const { bindingModes } = await next.queryBindingModes();
-          const tiling = await next.queryTilingDirection();
-          const globalTilingDirection =
-            (tiling as { globalTilingDirection?: typeof tiling.tilingDirection })
-              .globalTilingDirection ?? tiling.tilingDirection;
           const isPaused = await getIsPaused();
 
           return {
             ...(await getMonitorState()),
             focusedContainer,
-            tilingDirection: globalTilingDirection,
-            globalTilingDirection,
+            ...(await getTilingDirectionState()),
             bindingModes,
             isPaused,
             runCommand,
           };
+        }
+
+        async function getTilingDirectionState() {
+          const tiling = await next.queryTilingDirection();
+          return resolveGlazeWmTilingDirectionState(
+            tiling as Parameters<
+              typeof resolveGlazeWmTilingDirectionState
+            >[0],
+          );
         }
 
         // Paused state is only available on v3.7.0+ of GlazeWM.

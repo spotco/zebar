@@ -1,5 +1,5 @@
 import {
-  TilingDirection,
+  type TilingDirection,
   type BindingModeConfig,
   type Container,
   type Monitor,
@@ -12,6 +12,35 @@ import type { Provider } from '../create-base-provider';
 
 export interface GlazeWmProviderConfig {
   type: 'glazewm';
+}
+
+/**
+ * Direction fields exposed by the GlazeWM provider.
+ *
+ * `tilingDirection` remains the focused direction container for legacy
+ * consumers. `globalTilingDirection` is the WM-wide insertion axis used by
+ * spotcobuild chips and is kept independent when both values are present.
+ */
+export interface GlazeWmTilingDirectionState {
+  tilingDirection: TilingDirection;
+  globalTilingDirection: TilingDirection;
+}
+
+/**
+ * Normalize the legacy/new GlazeWM query response without aliasing a local
+ * direction to the global direction when the WM provides both fields.
+ */
+export function resolveGlazeWmTilingDirectionState(
+  tiling: {
+    tilingDirection: TilingDirection;
+    globalTilingDirection?: TilingDirection;
+  },
+): GlazeWmTilingDirectionState {
+  return {
+    tilingDirection: tiling.tilingDirection,
+    globalTilingDirection:
+      tiling.globalTilingDirection ?? tiling.tilingDirection,
+  };
 }
 
 export type GlazeWmProvider = Provider<
