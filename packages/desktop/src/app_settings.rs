@@ -360,25 +360,3 @@ impl AppSettings {
   }
 }
 
-/// Checks if an application is installed and available in the system PATH.
-///
-/// Returns `true` if the application is found in PATH, `false` otherwise.
-fn is_app_installed(app_name: &str) -> bool {
-  #[cfg(target_os = "windows")]
-  {
-    std::process::Command::new("where")
-      .arg(app_name)
-      .output()
-      .map(|output| output.status.success())
-      .unwrap_or(false)
-  }
-
-  #[cfg(any(target_os = "macos", target_os = "linux"))]
-  {
-    std::process::Command::new("which")
-      .arg(app_name)
-      .output()
-      .map(|output| output.status.success())
-      .unwrap_or(false)
-  }
-}
