@@ -15,7 +15,7 @@ import {
 } from 'glazewm';
 import { z } from 'zod';
 
-import { getMonitors, shellExec } from '~/desktop';
+import { getMonitors, readGlazeWmIpcPort } from '~/desktop';
 import { getCoordinateDistance } from '~/utils';
 import { createBaseProvider } from '../create-base-provider';
 import type {
@@ -30,69 +30,17 @@ const glazeWmProviderConfigSchema = z.object({
 
 async function resolveGlazeWmIpcPort(): Promise<number> {
   const DEFAULT_PORT = 6123;
+  // Single source of truth: GlazeWM writes ~/.glzr/glazewm/ipc.port on bind.
+  // Read via Tauri (Rust fs) — no cmd.exe, no multi-port probe.
   try {
-    // Forward slashes so JS string escapes cannot eat path separators.
-    // Widget capabilities may lack shell exec — then we probe below.
-    const result = await shellExec('cmd', [
-      '/d',
-      '/s',
-      '/c',
-      'if exist "%USERPROFILE%/.glzr/glazewm/ipc.port" (type "%USERPROFILE%/.glzr/glazewm/ipc.port")',
-    ]);
-    const raw = String(result.stdout ?? '').trim();
-    const port = Number.parseInt(raw, 10);
+    const port = await readGlazeWmIpcPort();
     if (Number.isFinite(port) && port > 0) {
       return port;
     }
   } catch {
-    // Missing shell permission or file: fall through to probe.
-  }
-  // Prefer fallback range before DEFAULT — ghost LISTENING often owns 6123.
-  // Skip 6124 (Zebar asset server).
-  for (const port of [6125, 6126, 6127, 6128, 6129, 6130, 6131, 6132, 6133]) {
-    if (await probeTcpPort(port)) {
-      return port;
-    }
+    // Command missing / invoke failed: fall through to default.
   }
   return DEFAULT_PORT;
-}
-
-function probeTcpPort(port: number): Promise<boolean> {
-  return new Promise(resolve => {
-    let settled = false;
-    const finish = (v: boolean) => {
-      if (!settled) {
-        settled = true;
-        resolve(v);
-      }
-    };
-    try {
-      const ws = new WebSocket(`ws://127.0.0.1:${port}`);
-      const timer = setTimeout(() => {
-        try {
-          ws.close();
-        } catch {
-          /* ignore */
-        }
-        finish(false);
-      }, 250);
-      ws.onopen = () => {
-        clearTimeout(timer);
-        try {
-          ws.close();
-        } catch {
-          /* ignore */
-        }
-        finish(true);
-      };
-      ws.onerror = () => {
-        clearTimeout(timer);
-        finish(false);
-      };
-    } catch {
-      finish(false);
-    }
-  });
 }
 
 
@@ -104,6 +52,7 @@ export function createGlazeWmProvider(
   return createBaseProvider(mergedConfig, async queue => {
     const monitors = await getMonitors();
     const port = await resolveGlazeWmIpcPort();
+    console.info(`[glazewm-ipc] connect port=${port}`);
     const client = new WmClient({ port });
     let unlistenEvents: null | UnlistenFn = null;
 

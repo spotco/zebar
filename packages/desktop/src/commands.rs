@@ -318,3 +318,88 @@ pub async fn shell_kill(
 ) -> anyhow::Result<(), String> {
   shell_state.kill(pid).map_err(|err| err.to_string())
 }
+
+
+/// Read GlazeWM IPC port from `%USERPROFILE%\.glzr\glazewm\ipc.port` (or `$HOME/...`).
+/// No shell, no console window. Missing/invalid file => default 6123.
+/// Also appends one line to `~/.glzr/zebar/glazewm-ipc.log`.
+#[tauri::command]
+pub fn read_glazewm_ipc_port() -> u32 {
+  const DEFAULT_PORT: u32 = 6123;
+  let started = std::time::Instant::now();
+  let home = std::env::var_os("USERPROFILE")
+    .or_else(|| std::env::var_os("HOME"));
+  let Some(home) = home else {
+    log_glazewm_ipc(format!(
+      "resolve: no home dir; default={DEFAULT_PORT} ({}ms)",
+      started.elapsed().as_millis()
+    ));
+    return DEFAULT_PORT;
+  };
+  let path = std::path::PathBuf::from(home)
+    .join(".glzr")
+    .join("glazewm")
+    .join("ipc.port");
+  match std::fs::read_to_string(&path) {
+    Ok(raw) => {
+      let trimmed = raw.trim();
+      match trimmed.parse::<u32>() {
+        Ok(port) if port > 0 => {
+          log_glazewm_ipc(format!(
+            "resolve: fs read {} -> {port} ({}ms)",
+            path.display(),
+            started.elapsed().as_millis()
+          ));
+          port
+        }
+        _ => {
+          log_glazewm_ipc(format!(
+            "resolve: ipc.port invalid {trimmed:?}; default={DEFAULT_PORT} ({}ms)",
+            started.elapsed().as_millis()
+          ));
+          DEFAULT_PORT
+        }
+      }
+    }
+    Err(err) => {
+      log_glazewm_ipc(format!(
+        "resolve: ipc.port missing ({err}); default={DEFAULT_PORT} ({}ms)",
+        started.elapsed().as_millis()
+      ));
+      DEFAULT_PORT
+    }
+  }
+}
+
+fn log_glazewm_ipc(message: impl AsRef<str>) {
+  let msg = message.as_ref();
+  tracing::info!("[glazewm-ipc] {msg}");
+  let Some(home) = std::env::var_os("USERPROFILE")
+    .or_else(|| std::env::var_os("HOME"))
+  else {
+    return;
+  };
+  let dir = std::path::PathBuf::from(home).join(".glzr").join("zebar");
+  let _ = std::fs::create_dir_all(&dir);
+  let path = dir.join("glazewm-ipc.log");
+  let ts = chrono_like_local();
+  let line = format!("{ts} {msg}\n");
+  if let Ok(mut f) = std::fs::OpenOptions::new()
+    .create(true)
+    .append(true)
+    .open(&path)
+  {
+    use std::io::Write;
+    let _ = f.write_all(line.as_bytes());
+  }
+}
+
+fn chrono_like_local() -> String {
+  // Local wall clock without pulling chrono crate — good enough for diag logs.
+  use std::time::{SystemTime, UNIX_EPOCH};
+  let secs = SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .map(|d| d.as_secs())
+    .unwrap_or(0);
+  format!("unix={secs}")
+}
