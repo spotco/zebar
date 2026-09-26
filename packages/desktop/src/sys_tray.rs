@@ -19,7 +19,7 @@ use tokio::task;
 use tracing::{error, info};
 
 use crate::{
-  app_settings::{AppSettings, StartupConfig, VERSION_NUMBER},
+  app_settings::{AppSettings, StartupConfig},
   widget_factory::{WidgetFactory, WidgetOpenOptions, WidgetState},
   widget_pack::{WidgetConfig, WidgetPack, WidgetPackManager},
 };
@@ -180,7 +180,7 @@ impl SysTray {
   }
 
   async fn create_tray_icon(&self) -> anyhow::Result<TrayIcon> {
-    let tooltip = format!("Zebar v{}", VERSION_NUMBER);
+    let tooltip = format!("Zebar {}", env!("SPOTCO_BUILD_ID"));
 
     // Linting: `mut` needed for Windows where `tray_icon` is modified with
     // additional click handler.
