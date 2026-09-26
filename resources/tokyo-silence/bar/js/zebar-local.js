@@ -4064,6 +4064,115 @@ var z = /* @__PURE__ */ Object.freeze({
   ZodError
 });
 
+// src/config/config-schemas.ts
+var length = z.string().regex(
+  /^([+-]?\d+(?:\.\d+)?)(%|px)?$/,
+  "Not a valid length value. Must be of format '10px' or '10%'."
+);
+var name = z.string().min(2, "Name must be at least 2 characters.").max(28, "Name cannot exceed 28 characters.").regex(
+  /^[a-z0-9][a-z0-9-_]*$/,
+  "Only lowercase letters, numbers, and the characters - and _ are allowed."
+);
+var version = z.string().regex(
+  /^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$/,
+  'Version must be in the format "x.y.z" (e.g. "1.0.0").'
+);
+var widget = z.object({
+  name,
+  htmlPath: z.string().refine((path) => path.endsWith(".html"), {
+    message: 'Must be a valid HTML file path (e.g. "path/to/widget.html").'
+  }),
+  zOrder: z.enum(["normal", "top_most", "bottom_most"]),
+  shownInTaskbar: z.boolean(),
+  focused: z.boolean(),
+  resizable: z.boolean(),
+  transparent: z.boolean(),
+  includeFiles: z.array(z.string()).default([]),
+  caching: z.object({
+    defaultDuration: z.number(),
+    rules: z.array(
+      z.object({
+        urlRegex: z.string(),
+        duration: z.number()
+      })
+    )
+  }),
+  privileges: z.object({
+    shellCommands: z.array(
+      z.object({
+        program: z.string(),
+        argsRegex: z.string()
+      })
+    )
+  }),
+  presets: z.array(
+    z.object({
+      name: z.string(),
+      anchor: z.enum([
+        "top_left",
+        "top_center",
+        "top_right",
+        "center_left",
+        "center",
+        "center_right",
+        "bottom_left",
+        "bottom_center",
+        "bottom_right"
+      ]),
+      offsetX: length,
+      offsetY: length,
+      width: length,
+      height: length,
+      monitorSelection: z.union([
+        z.object({
+          type: z.literal("all")
+        }),
+        z.object({
+          type: z.literal("primary")
+        }),
+        z.object({
+          type: z.literal("secondary")
+        }),
+        z.object({
+          type: z.literal("index"),
+          match: z.number()
+        }),
+        z.object({
+          type: z.literal("name"),
+          match: z.string()
+        })
+      ]),
+      dockToEdge: z.object({
+        enabled: z.boolean(),
+        edge: z.enum(["top", "right", "bottom", "left"]).nullable(),
+        windowMargin: z.string()
+      })
+    })
+  )
+});
+var widgetPack = z.object({
+  name,
+  version,
+  description: z.string().max(1e3, "Description cannot exceed 1000 characters."),
+  tags: z.array(z.string()).max(10, "At most 10 tags are allowed."),
+  previewImages: z.array(
+    z.string().refine((url) => !url.startsWith("http"), {
+      message: "Preview image must be a file within the widget pack."
+    }).refine((url) => !url.includes(":\\") && !url.startsWith("/"), {
+      message: 'Preview image must be a relative file path (e.g. "resources/preview.png")'
+    })
+  ).min(1, "At least one preview image is required.").max(6, "At most 6 preview images are allowed."),
+  widgets: z.array(widget),
+  repositoryUrl: z.string().url().or(z.literal(""))
+});
+var configSchemas = {
+  length,
+  name,
+  version,
+  widget,
+  widgetPack
+};
+
 // ../../node_modules/.pnpm/@tauri-apps+api@2.0.2/node_modules/@tauri-apps/api/external/tslib/tslib.es6.js
 function __classPrivateFieldGet2(receiver, state, kind, f) {
   if (kind === "a" && !f)
@@ -4113,6 +4222,136 @@ var Resource = class {
   }
 };
 _Resource_rid = /* @__PURE__ */ new WeakMap();
+
+// src/utils/create-logger.ts
+function createLogger(section) {
+  function log(consoleLogMethod, message, ...data) {
+    const date = /* @__PURE__ */ new Date();
+    const timestamp = `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}:${date.getSeconds().toString().padStart(2, "0")}:${date.getMilliseconds().toString().padStart(3, "0")}`;
+    console[consoleLogMethod](
+      `%c[Zebar] %c${timestamp}%c${section ? ` (${section})` : ""} %c${message}`,
+      "color: #4ade80",
+      "color: #f5f9b4",
+      "color: #d0b4f9",
+      "color: inherit",
+      ...data
+    );
+  }
+  function debug(message, ...data) {
+    log("log", message, ...data);
+  }
+  function info(message, ...data) {
+    log("log", message, ...data);
+  }
+  function warn(message, ...data) {
+    log("warn", message, ...data);
+  }
+  function error(message, ...data) {
+    log("error", message, ...data);
+  }
+  return {
+    debug,
+    info,
+    warn,
+    error
+  };
+}
+
+// src/utils/get-coordinate-distance.ts
+function getCoordinateDistance(pointA, pointB) {
+  return Math.sqrt(
+    Math.pow(pointB.x - pointA.x, 2) + Math.pow(pointB.y - pointA.y, 2)
+  );
+}
+
+// src/utils/simple-hash.ts
+function simpleHash(...args) {
+  return JSON.stringify(
+    args,
+    (_, val) => typeof val === "object" ? val : String(val)
+  );
+}
+
+// src/desktop/desktop-commands.ts
+var logger = createLogger();
+var desktopCommands = {
+  startWidget,
+  startWidgetPreset,
+  listenProvider,
+  unlistenProvider,
+  callProviderFunction,
+  setAlwaysOnTop,
+  setSkipTaskbar,
+  shellExec,
+  shellSpawn,
+  shellWrite,
+  shellKill,
+  readGlazeWmIpcPort
+};
+function startWidget(packId, widgetName, placement, isPreview) {
+  return invoke2("start_widget", {
+    packId,
+    widgetName,
+    placement,
+    isPreview
+  });
+}
+function startWidgetPreset(packId, widgetName, presetName, isPreview) {
+  return invoke2("start_widget_preset", {
+    packId,
+    widgetName,
+    presetName,
+    isPreview
+  });
+}
+function listenProvider(args) {
+  return invoke2("listen_provider", args);
+}
+function unlistenProvider(configHash) {
+  return invoke2("unlisten_provider", { configHash });
+}
+function callProviderFunction(configHash, fn) {
+  return invoke2("call_provider_function", {
+    configHash,
+    function: fn
+  });
+}
+function setAlwaysOnTop() {
+  return invoke2("set_always_on_top");
+}
+function setSkipTaskbar(skip) {
+  return invoke2("set_skip_taskbar", { skip });
+}
+function shellExec(program, args = [], options = {}) {
+  return invoke2("shell_exec", {
+    program,
+    args,
+    options
+  });
+}
+function shellSpawn(program, args = [], options = {}) {
+  return invoke2("shell_spawn", { program, args, options });
+}
+function shellWrite(processId, buffer) {
+  return invoke2("shell_write", { processId, buffer });
+}
+function shellKill(processId) {
+  return invoke2("shell_kill", { processId });
+}
+function readGlazeWmIpcPort() {
+  return invoke2("read_glazewm_ipc_port");
+}
+async function invoke2(command, args) {
+  logger.info(`Calling '${command}' with args:`, args ?? {});
+  try {
+    const response = await invoke(command, args);
+    logger.info(`Response for calling '${command}':`, response);
+    return response;
+  } catch (err) {
+    logger.error(`Command '${command}' failed: ${err}`);
+    throw new Error(`Command '${command}' failed: ${err}`);
+  }
+}
 
 // ../../node_modules/.pnpm/@tauri-apps+api@2.0.2/node_modules/@tauri-apps/api/dpi.js
 var LogicalSize = class {
@@ -5957,6 +6196,713 @@ async function primaryMonitor() {
 }
 async function availableMonitors() {
   return invoke("plugin:window|available_monitors").then((ms) => ms.map(mapMonitor));
+}
+
+// src/desktop/monitors.ts
+var createCachePromise = null;
+async function getMonitors() {
+  return createCachePromise ?? (createCachePromise = createMonitorCache());
+}
+async function createMonitorCache() {
+  const [currentMonitor2, primaryMonitor2, allMonitors] = await Promise.all([
+    currentMonitor(),
+    primaryMonitor(),
+    availableMonitors()
+  ]);
+  const secondaryMonitors = allMonitors.filter(
+    (monitor) => !primaryMonitor2 || !isMatch(monitor, primaryMonitor2)
+  );
+  const monitorCache = {
+    currentMonitor: currentMonitor2 ? toMonitor(currentMonitor2) : null,
+    primaryMonitor: primaryMonitor2 ? toMonitor(primaryMonitor2) : null,
+    secondaryMonitors: secondaryMonitors.map(toMonitor),
+    allMonitors: allMonitors.map(toMonitor)
+  };
+  getCurrentWindow().onResized(() => updateCurrentMonitor());
+  getCurrentWindow().onMoved(() => updateCurrentMonitor());
+  async function updateCurrentMonitor() {
+    const currentMonitor3 = await currentMonitor();
+    Object.assign(monitorCache, {
+      currentMonitor: currentMonitor3 ? toMonitor(currentMonitor3) : null
+    });
+  }
+  return monitorCache;
+}
+function isMatch(monitorA, monitorB) {
+  return monitorA.name === monitorB.name && monitorA.position.x === monitorB.position.x && monitorA.position.y === monitorB.position.y && monitorA.size.width === monitorB.size.width && monitorA.size.height === monitorB.size.height;
+}
+function toMonitor(monitor) {
+  return {
+    name: monitor.name,
+    width: monitor.size.width,
+    height: monitor.size.height,
+    x: monitor.position.x,
+    y: monitor.position.y,
+    scaleFactor: monitor.scaleFactor
+  };
+}
+
+// src/desktop/provider-emit.ts
+var listenPromise = null;
+var callbacks = [];
+async function onProviderEmit(config, callback) {
+  const configHash = simpleHash(config);
+  registerEventCallback(configHash, callback);
+  const unlisten = await (listenPromise ?? (listenPromise = listenProviderEmit()));
+  await desktopCommands.listenProvider({
+    configHash,
+    config
+  });
+  return async () => {
+    callbacks = callbacks.filter(
+      (callback2) => callback2.configHash !== configHash
+    );
+    await desktopCommands.unlistenProvider(configHash);
+    if (callbacks.length === 0) {
+      unlisten();
+      listenPromise = null;
+    }
+  };
+}
+function registerEventCallback(configHash, callback) {
+  const wrappedCallback = (event) => {
+    if (event.payload.configHash !== configHash) {
+      return;
+    }
+    callback(event.payload);
+  };
+  callbacks.push({ configHash, fn: wrappedCallback });
+}
+async function listenProviderEmit() {
+  return listen("provider-emit", (event) => {
+    callbacks.forEach((callback) => {
+      if (event.payload.configHash === callback.configHash) {
+        callback.fn(event);
+      }
+    });
+  });
+}
+
+// src/desktop/shell.ts
+async function shellExec2(program, args, options) {
+  return await desktopCommands.shellExec(program, args, options);
+}
+async function shellSpawn2(program, args, options) {
+  const processId = await desktopCommands.shellSpawn(
+    program,
+    args,
+    options
+  );
+  const stdoutCallbacks = [];
+  const stderrCallbacks = [];
+  const errorCallbacks = [];
+  const exitCallbacks = [];
+  const unlistenEvents = await listen(
+    "shell-emit",
+    (event) => {
+      if (event.payload.pid === processId) {
+        const shellEvent = event.payload.event;
+        switch (shellEvent.type) {
+          case "stdout":
+            stdoutCallbacks.forEach(
+              (callback) => callback(shellEvent.data)
+            );
+            break;
+          case "stderr":
+            stderrCallbacks.forEach(
+              (callback) => callback(shellEvent.data)
+            );
+            break;
+          case "error":
+            errorCallbacks.forEach((callback) => callback(shellEvent.data));
+            break;
+          case "terminated":
+            exitCallbacks.forEach((callback) => callback(shellEvent.data));
+            unlistenEvents();
+            break;
+        }
+      }
+    }
+  );
+  return {
+    processId,
+    onStdout: (callback) => stdoutCallbacks.push(callback),
+    onStderr: (callback) => stderrCallbacks.push(callback),
+    onExit: (callback) => exitCallbacks.push(callback),
+    kill: () => desktopCommands.shellKill(processId),
+    write: (data) => desktopCommands.shellWrite(processId, data)
+  };
+}
+
+// src/desktop/widgets.ts
+function getWidgetState() {
+  if (window.__ZEBAR_STATE) {
+    return window.__ZEBAR_STATE;
+  }
+  const widgetState = sessionStorage.getItem("ZEBAR_STATE");
+  if (!widgetState) {
+    throw new Error("No widget state found.");
+  }
+  return JSON.parse(widgetState);
+}
+function currentWidget() {
+  const state = getWidgetState();
+  const tauriWindow = getCurrentWindow();
+  return {
+    id: state.id,
+    name: state.name,
+    packId: state.packId,
+    configPath: state.configPath,
+    htmlPath: state.htmlPath,
+    window: {
+      get tauri() {
+        return tauriWindow;
+      },
+      setZOrder: (zOrder) => setZOrder(tauriWindow, zOrder)
+    },
+    tauriWindow,
+    isPreview: state.isPreview,
+    setZOrder: (zOrder) => setZOrder(tauriWindow, zOrder),
+    close: () => close(tauriWindow)
+  };
+}
+async function setZOrder(window2, zOrder) {
+  if (zOrder === "bottom_most") {
+    await window2.setAlwaysOnBottom(true);
+  } else if (zOrder === "top_most") {
+    await desktopCommands.setAlwaysOnTop();
+  } else {
+    await window2.setAlwaysOnTop(false);
+  }
+}
+async function close(window2) {
+  await window2.close();
+}
+async function startWidget2(widgetName, placement, args) {
+  return desktopCommands.startWidget(
+    args?.packId ?? currentWidget().packId,
+    widgetName,
+    placement,
+    getWidgetState().isPreview
+  );
+}
+async function startWidgetPreset2(widgetName, presetName, args) {
+  return desktopCommands.startWidgetPreset(
+    args?.packId ?? currentWidget().packId,
+    widgetName,
+    presetName,
+    getWidgetState().isPreview
+  );
+}
+
+// ../../node_modules/.pnpm/glazewm@1.7.0/node_modules/glazewm/dist/index.mjs
+var WmClient = class {
+  /**
+   * Instantiates client and attempts to connect to IPC server.
+   *
+   * The client will automatically attempt to reconnect on disconnections,
+   * configurable via {@link WmClientOptions.reconnectInterval}.
+   */
+  constructor(_options) {
+    this._options = _options;
+    this.connect().catch(() => {
+    });
+  }
+  DEFAULT_PORT = 6123;
+  DEFAULT_RECONNECT_INTERVAL = 5e3;
+  /**
+   * Promise that resolves to `WebSocket` instance if connected.
+   *
+   * Prevents duplicate connections.
+   */
+  _socketPromise = null;
+  /**
+   * Whether the connection was closed via {@link closeConnection}.
+   */
+  _isManuallyClosed = false;
+  _onMessageCallbacks = [];
+  _onConnectCallbacks = [];
+  _onDisconnectCallbacks = [];
+  _onErrorCallbacks = [];
+  /**
+   * Gets all monitors. {@link Monitor}
+   *
+   * @throws If connection to IPC server fails.
+   */
+  async queryMonitors() {
+    return this._sendAndWaitReply("query monitors");
+  }
+  /**
+   * Gets all active workspaces. {@link Workspace}
+   *
+   * @throws If connection to IPC server fails.
+   */
+  async queryWorkspaces() {
+    return this._sendAndWaitReply("query workspaces");
+  }
+  /**
+   * Gets all managed windows. {@link Window}
+   *
+   * @throws If connection to IPC server fails.
+   */
+  async queryWindows() {
+    return this._sendAndWaitReply("query windows");
+  }
+  /**
+   * Gets the currently focused container. This can either be a
+   * {@link Window} or a {@link Workspace} without any descendant windows.
+   *
+   * @throws If connection to IPC server fails.
+   */
+  async queryFocused() {
+    return this._sendAndWaitReply("query focused");
+  }
+  /**
+   * Gets the active binding modes.
+   *
+   * @throws If connection to IPC server fails.
+   */
+  async queryBindingModes() {
+    return this._sendAndWaitReply(
+      "query binding-modes"
+    );
+  }
+  /**
+   * Gets metadata about the running GlazeWM application.
+   *
+   * @throws If connection to IPC server fails.
+   */
+  async queryAppMetadata() {
+    return this._sendAndWaitReply(
+      "query app-metadata"
+    );
+  }
+  /**
+   * Gets the tiling direction of the focused container.
+   *
+   * @throws If connection to IPC server fails.
+   */
+  async queryTilingDirection() {
+    return this._sendAndWaitReply(
+      "query tiling-direction"
+    );
+  }
+  /**
+   * Gets the current paused state.
+   *
+   * @throws If connection to IPC server fails.
+   */
+  async queryPaused() {
+    return this._sendAndWaitReply("query paused");
+  }
+  /**
+   * Invokes a WM command (e.g. `"focus --workspace 1"`).
+   *
+   * @param command WM command to run (e.g. `"focus --workspace 1"`).
+   * @param subjectContainerId (optional) ID of container to use as subject.
+   * If not provided, this defaults to the currently focused container.
+   * @throws If the command errors or connection to IPC server fails.
+   */
+  async runCommand(command, subjectContainerId) {
+    return this._sendAndWaitReply(
+      subjectContainerId ? `command --id ${subjectContainerId} ${command}` : `command ${command}`
+    );
+  }
+  /**
+   * Establishes websocket connection.
+   *
+   * @throws If connection to IPC server fails.
+   */
+  async connect() {
+    this._isManuallyClosed = false;
+    this._socketPromise ??= this._createSocket();
+    await this._waitForConnection();
+  }
+  /**
+   * Closes the websocket connection.
+   */
+  async closeConnection() {
+    this._isManuallyClosed = true;
+    (await this._socketPromise)?.close();
+  }
+  /**
+   * Registers a callback for a GlazeWM event type.
+   *
+   * Persists the subscription across reconnections.
+   *
+   * @example
+   * ```typescript
+   * const unlisten = await client.subscribe(
+   *   WmEventType.FOCUS_CHANGED,
+   *   (event: FocusChangedEvent) => { ... }
+   * });
+   * ```
+   * @throws If *initial* connection to IPC server fails.
+   */
+  async subscribe(event, callback) {
+    return this.subscribeMany([event], callback);
+  }
+  /**
+   * Registers a callback for multiple GlazeWM event types.
+   *
+   * Persists the subscription across reconnections.
+   *
+   * @example
+   * ```typescript
+   * const unlisten = await client.subscribeMany(
+   *   [WmEventType.WORSPACE_ACTIVATED, WmEventType.WORSPACE_DEACTIVATED],
+   *   (event: WorkspaceActivatedEvent | WorkspaceDeactivatedEvent) => { ... }
+   * );
+   * ```
+   * @throws If *initial* connection to IPC server fails.
+   */
+  async subscribeMany(events, callback) {
+    let subscriptionId = await this._sendSubscribe(events);
+    const unlistenMessage = this.onMessage((e) => {
+      const serverMessage = JSON.parse(
+        e.data
+      );
+      const isSubscribedEvent = serverMessage.messageType === "event_subscription" && serverMessage.subscriptionId === subscriptionId;
+      if (isSubscribedEvent) {
+        callback(serverMessage.data);
+      }
+    });
+    const unlistenConnect = this.onConnect(async (e) => {
+      this._sendUnsubscribe(subscriptionId);
+      subscriptionId = await this._sendSubscribe(events);
+    });
+    return async () => {
+      unlistenMessage();
+      unlistenConnect();
+      await this._sendUnsubscribe(subscriptionId);
+    };
+  }
+  /**
+   * Registers a callback for when websocket messages are received.
+   *
+   * @example
+   * ```typescript
+   * const unlisten = client.onDisconnect(e => console.log(e));
+   * ```
+   */
+  onMessage(callback) {
+    return this._registerCallback(this._onMessageCallbacks, callback);
+  }
+  /**
+   * Registers a callback for when the websocket connects or reconnects.
+   *
+   * @example
+   * ```typescript
+   * const unlisten = client.onDisconnect(e => console.log(e));
+   * ```
+   */
+  onConnect(callback) {
+    return this._registerCallback(this._onConnectCallbacks, callback);
+  }
+  /**
+   * Registers a callback for when the websocket disconnects.
+   *
+   * @example
+   * ```typescript
+   * const unlisten = client.onDisconnect(e => console.log(e));
+   * ```
+   */
+  onDisconnect(callback) {
+    return this._registerCallback(this._onDisconnectCallbacks, callback);
+  }
+  /**
+   * Registers a callback for when the websocket connection has been closed
+   * due to an error.
+   *
+   * @example
+   * ```typescript
+   * const unlisten = client.onError(e => console.error(e));
+   * ```
+   */
+  onError(callback) {
+    return this._registerCallback(this._onErrorCallbacks, callback);
+  }
+  /**
+   * Sends an IPC message and waits for a reply.
+   *
+   * @private
+   * @throws If message is invalid or connection to IPC server fails.
+   */
+  async _sendAndWaitReply(message) {
+    if (this._isManuallyClosed) {
+      throw new Error(
+        "Websocket connection was closed via `closeConnection`."
+      );
+    }
+    await this.connect();
+    const socket = await this._socketPromise;
+    return new Promise(async (resolve, reject) => {
+      socket.send(message, (error) => {
+        if (error) {
+          reject(error);
+        }
+      });
+      const unlisten = this.onMessage((e) => {
+        const serverMessage = JSON.parse(
+          e.data
+        );
+        const isReplyMessage = serverMessage.messageType === "client_response" && serverMessage.clientMessage === message;
+        if (isReplyMessage) {
+          unlisten();
+          if (serverMessage.error) {
+            reject(serverMessage.error);
+          } else {
+            resolve(serverMessage.data);
+          }
+        }
+      });
+    });
+  }
+  /**
+   * Utility function for registering a callback.
+   *
+   * @private
+   */
+  _registerCallback(callbacks2, newCallback) {
+    callbacks2.push(newCallback);
+    return () => {
+      for (const [index, callback] of callbacks2.entries()) {
+        if (callback === newCallback) {
+          callbacks2.splice(index, 1);
+        }
+      }
+    };
+  }
+  /**
+   * Instantiates `WebSocket` and adds event listeners for socket events.
+   *
+   * @private
+   */
+  async _createSocket() {
+    const WebSocketApi = await (globalThis.WebSocket ?? import("ws").then((ws) => ws.default).catch(() => {
+      throw new Error(
+        "The dependency 'ws' is required for environments without abuilt-in WebSocket API. \nRun `npm i ws` to resolve thiserror."
+      );
+    }));
+    const socket = new WebSocketApi(
+      `ws://localhost:${this._options?.port ?? this.DEFAULT_PORT}`
+    );
+    socket.onmessage = (e) => this._onMessageCallbacks.forEach((callback) => callback(e));
+    socket.onopen = (e) => this._onConnectCallbacks.forEach((callback) => callback(e));
+    socket.onerror = (e) => this._onErrorCallbacks.forEach((callback) => callback(e));
+    socket.onclose = (e) => {
+      this._onDisconnectCallbacks.forEach((callback) => callback(e));
+      if (!this._isManuallyClosed) {
+        setTimeout(
+          () => this._socketPromise = this._createSocket(),
+          this._options?.reconnectInterval ?? this.DEFAULT_RECONNECT_INTERVAL
+        );
+      }
+    };
+    return socket;
+  }
+  /**
+   * Waits for the websocket connection to be established.
+   *
+   * @private
+   * @throws On disconnect or close.
+   */
+  async _waitForConnection() {
+    const socket = await this._socketPromise;
+    if (!socket || socket.readyState === socket.CLOSED || socket.readyState === socket.CLOSING) {
+      throw new Error("Websocket connection is closed.");
+    }
+    if (socket.readyState === socket.OPEN) {
+      return socket;
+    }
+    return new Promise(async (resolve, reject) => {
+      function cleanup() {
+        if (unlistenConnect)
+          unlistenConnect();
+        if (unlistenDisconnect)
+          unlistenDisconnect();
+      }
+      const unlistenConnect = this.onConnect(() => {
+        cleanup();
+        resolve(socket);
+      });
+      const unlistenDisconnect = this.onDisconnect(() => {
+        cleanup();
+        reject(new Error("Failed to establish websocket connection."));
+      });
+    });
+  }
+  /**
+   * @private
+   * @throws If connection to IPC server fails.
+   */
+  async _sendSubscribe(events) {
+    const { subscriptionId } = await this._sendAndWaitReply(
+      `sub --events ${events.join(" ")}`
+    );
+    return subscriptionId;
+  }
+  /**
+   * @private
+   * @throws If connection to IPC server fails.
+   */
+  async _sendUnsubscribe(subscriptionId) {
+    await this._sendAndWaitReply(`unsub --id ${subscriptionId}`);
+  }
+};
+var WmEventType = /* @__PURE__ */ ((WmEventType2) => {
+  WmEventType2["ALL"] = "all";
+  WmEventType2["APPLICATION_EXITING"] = "application_exiting";
+  WmEventType2["BINDING_MODES_CHANGED"] = "binding_modes_changed";
+  WmEventType2["FOCUS_CHANGED"] = "focus_changed";
+  WmEventType2["FOCUSED_CONTAINER_MOVED"] = "focused_container_moved";
+  WmEventType2["MONITOR_ADDED"] = "monitor_added";
+  WmEventType2["MONITOR_UPDATED"] = "monitor_updated";
+  WmEventType2["MONITOR_REMOVED"] = "monitor_removed";
+  WmEventType2["TILING_DIRECTION_CHANGED"] = "tiling_direction_changed";
+  WmEventType2["USER_CONFIG_CHANGED"] = "user_config_changed";
+  WmEventType2["WINDOW_MANAGED"] = "window_managed";
+  WmEventType2["WINDOW_UNMANAGED"] = "window_unmanaged";
+  WmEventType2["WORKSPACE_ACTIVATED"] = "workspace_activated";
+  WmEventType2["WORKSPACE_DEACTIVATED"] = "workspace_deactivated";
+  WmEventType2["WORKSPACE_UPDATED"] = "workspace_updated";
+  WmEventType2["PAUSE_CHANGED"] = "pause_changed";
+  return WmEventType2;
+})(WmEventType || {});
+
+// src/providers/create-base-provider.ts
+function createBaseProvider(config, fetcher) {
+  const logger2 = createLogger(config.type);
+  const outputListeners = /* @__PURE__ */ new Set();
+  const errorListeners = /* @__PURE__ */ new Set();
+  let latestEmission = {
+    output: null,
+    error: null,
+    hasError: false
+  };
+  let unlisten = startFetcher();
+  function startFetcher() {
+    return fetcher({
+      output: (output) => {
+        logger2.debug("Provider output:", output);
+        latestEmission = { output, error: null, hasError: false };
+        outputListeners.forEach((listener) => listener(output));
+      },
+      error: (error) => {
+        logger2.warn("Provider error:", error);
+        latestEmission = { output: null, error, hasError: true };
+        errorListeners.forEach((listener) => listener(error));
+      }
+    });
+  }
+  return {
+    get output() {
+      return latestEmission.output;
+    },
+    get error() {
+      return latestEmission.error;
+    },
+    get hasError() {
+      return latestEmission.hasError;
+    },
+    config,
+    restart: async () => {
+      if (unlisten) {
+        await (await unlisten)();
+      }
+      unlisten = startFetcher();
+    },
+    stop: async () => {
+      outputListeners.clear();
+      errorListeners.clear();
+      if (unlisten) {
+        await (await unlisten)();
+        unlisten = null;
+      }
+    },
+    onOutput: (callback) => {
+      outputListeners.add(callback);
+    },
+    onError: (callback) => {
+      errorListeners.add(callback);
+    }
+  };
+}
+
+// src/providers/audio/create-audio-provider.ts
+var audioProviderConfigSchema = z.object({
+  type: z.literal("audio")
+});
+function createAudioProvider(config) {
+  const mergedConfig = audioProviderConfigSchema.parse(config);
+  return createBaseProvider(mergedConfig, async (queue) => {
+    return onProviderEmit(
+      mergedConfig,
+      ({ configHash, result }) => {
+        if ("error" in result) {
+          queue.error(result.error);
+        } else {
+          queue.output({
+            ...result.output,
+            setVolume: (volume, options) => {
+              return desktopCommands.callProviderFunction(configHash, {
+                type: "audio",
+                function: {
+                  name: "set_volume",
+                  args: { volume, deviceId: options?.deviceId }
+                }
+              });
+            },
+            setMute: (mute, options) => {
+              return desktopCommands.callProviderFunction(configHash, {
+                type: "audio",
+                function: {
+                  name: "set_mute",
+                  args: { mute, deviceId: options?.deviceId }
+                }
+              });
+            }
+          });
+        }
+      }
+    );
+  });
+}
+
+// src/providers/battery/create-battery-provider.ts
+var batteryProviderConfigSchema = z.object({
+  type: z.literal("battery"),
+  refreshInterval: z.coerce.number().default(60 * 1e3)
+});
+function createBatteryProvider(config) {
+  const mergedConfig = batteryProviderConfigSchema.parse(config);
+  return createBaseProvider(mergedConfig, async (queue) => {
+    return onProviderEmit(mergedConfig, ({ result }) => {
+      if ("error" in result) {
+        queue.error(result.error);
+      } else {
+        queue.output(result.output);
+      }
+    });
+  });
+}
+
+// src/providers/cpu/create-cpu-provider.ts
+var cpuProviderConfigSchema = z.object({
+  type: z.literal("cpu"),
+  refreshInterval: z.coerce.number().default(5 * 1e3)
+});
+function createCpuProvider(config) {
+  const mergedConfig = cpuProviderConfigSchema.parse(config);
+  return createBaseProvider(mergedConfig, async (queue) => {
+    return onProviderEmit(mergedConfig, ({ result }) => {
+      if ("error" in result) {
+        queue.error(result.error);
+      } else {
+        queue.output(result.output);
+      }
+    });
+  });
 }
 
 // ../../node_modules/.pnpm/luxon@3.4.4/node_modules/luxon/src/errors.js
@@ -12180,923 +13126,7 @@ function friendlyDateTime(dateTimeish) {
   }
 }
 
-// ../../node_modules/.pnpm/glazewm@1.7.0/node_modules/glazewm/dist/index.mjs
-var WmClient = class {
-  /**
-   * Instantiates client and attempts to connect to IPC server.
-   *
-   * The client will automatically attempt to reconnect on disconnections,
-   * configurable via {@link WmClientOptions.reconnectInterval}.
-   */
-  constructor(_options) {
-    this._options = _options;
-    this.connect().catch(() => {
-    });
-  }
-  DEFAULT_PORT = 6123;
-  DEFAULT_RECONNECT_INTERVAL = 5e3;
-  /**
-   * Promise that resolves to `WebSocket` instance if connected.
-   *
-   * Prevents duplicate connections.
-   */
-  _socketPromise = null;
-  /**
-   * Whether the connection was closed via {@link closeConnection}.
-   */
-  _isManuallyClosed = false;
-  _onMessageCallbacks = [];
-  _onConnectCallbacks = [];
-  _onDisconnectCallbacks = [];
-  _onErrorCallbacks = [];
-  /**
-   * Gets all monitors. {@link Monitor}
-   *
-   * @throws If connection to IPC server fails.
-   */
-  async queryMonitors() {
-    return this._sendAndWaitReply("query monitors");
-  }
-  /**
-   * Gets all active workspaces. {@link Workspace}
-   *
-   * @throws If connection to IPC server fails.
-   */
-  async queryWorkspaces() {
-    return this._sendAndWaitReply("query workspaces");
-  }
-  /**
-   * Gets all managed windows. {@link Window}
-   *
-   * @throws If connection to IPC server fails.
-   */
-  async queryWindows() {
-    return this._sendAndWaitReply("query windows");
-  }
-  /**
-   * Gets the currently focused container. This can either be a
-   * {@link Window} or a {@link Workspace} without any descendant windows.
-   *
-   * @throws If connection to IPC server fails.
-   */
-  async queryFocused() {
-    return this._sendAndWaitReply("query focused");
-  }
-  /**
-   * Gets the active binding modes.
-   *
-   * @throws If connection to IPC server fails.
-   */
-  async queryBindingModes() {
-    return this._sendAndWaitReply(
-      "query binding-modes"
-    );
-  }
-  /**
-   * Gets metadata about the running GlazeWM application.
-   *
-   * @throws If connection to IPC server fails.
-   */
-  async queryAppMetadata() {
-    return this._sendAndWaitReply(
-      "query app-metadata"
-    );
-  }
-  /**
-   * Gets the tiling direction of the focused container.
-   *
-   * @throws If connection to IPC server fails.
-   */
-  async queryTilingDirection() {
-    return this._sendAndWaitReply(
-      "query tiling-direction"
-    );
-  }
-  /**
-   * Gets the current paused state.
-   *
-   * @throws If connection to IPC server fails.
-   */
-  async queryPaused() {
-    return this._sendAndWaitReply("query paused");
-  }
-  /**
-   * Invokes a WM command (e.g. `"focus --workspace 1"`).
-   *
-   * @param command WM command to run (e.g. `"focus --workspace 1"`).
-   * @param subjectContainerId (optional) ID of container to use as subject.
-   * If not provided, this defaults to the currently focused container.
-   * @throws If the command errors or connection to IPC server fails.
-   */
-  async runCommand(command, subjectContainerId) {
-    return this._sendAndWaitReply(
-      subjectContainerId ? `command --id ${subjectContainerId} ${command}` : `command ${command}`
-    );
-  }
-  /**
-   * Establishes websocket connection.
-   *
-   * @throws If connection to IPC server fails.
-   */
-  async connect() {
-    this._isManuallyClosed = false;
-    this._socketPromise ??= this._createSocket();
-    await this._waitForConnection();
-  }
-  /**
-   * Closes the websocket connection.
-   */
-  async closeConnection() {
-    this._isManuallyClosed = true;
-    (await this._socketPromise)?.close();
-  }
-  /**
-   * Registers a callback for a GlazeWM event type.
-   *
-   * Persists the subscription across reconnections.
-   *
-   * @example
-   * ```typescript
-   * const unlisten = await client.subscribe(
-   *   WmEventType.FOCUS_CHANGED,
-   *   (event: FocusChangedEvent) => { ... }
-   * });
-   * ```
-   * @throws If *initial* connection to IPC server fails.
-   */
-  async subscribe(event, callback) {
-    return this.subscribeMany([event], callback);
-  }
-  /**
-   * Registers a callback for multiple GlazeWM event types.
-   *
-   * Persists the subscription across reconnections.
-   *
-   * @example
-   * ```typescript
-   * const unlisten = await client.subscribeMany(
-   *   [WmEventType.WORSPACE_ACTIVATED, WmEventType.WORSPACE_DEACTIVATED],
-   *   (event: WorkspaceActivatedEvent | WorkspaceDeactivatedEvent) => { ... }
-   * );
-   * ```
-   * @throws If *initial* connection to IPC server fails.
-   */
-  async subscribeMany(events, callback) {
-    let subscriptionId = await this._sendSubscribe(events);
-    const unlistenMessage = this.onMessage((e) => {
-      const serverMessage = JSON.parse(
-        e.data
-      );
-      const isSubscribedEvent = serverMessage.messageType === "event_subscription" && serverMessage.subscriptionId === subscriptionId;
-      if (isSubscribedEvent) {
-        callback(serverMessage.data);
-      }
-    });
-    const unlistenConnect = this.onConnect(async (e) => {
-      this._sendUnsubscribe(subscriptionId);
-      subscriptionId = await this._sendSubscribe(events);
-    });
-    return async () => {
-      unlistenMessage();
-      unlistenConnect();
-      await this._sendUnsubscribe(subscriptionId);
-    };
-  }
-  /**
-   * Registers a callback for when websocket messages are received.
-   *
-   * @example
-   * ```typescript
-   * const unlisten = client.onDisconnect(e => console.log(e));
-   * ```
-   */
-  onMessage(callback) {
-    return this._registerCallback(this._onMessageCallbacks, callback);
-  }
-  /**
-   * Registers a callback for when the websocket connects or reconnects.
-   *
-   * @example
-   * ```typescript
-   * const unlisten = client.onDisconnect(e => console.log(e));
-   * ```
-   */
-  onConnect(callback) {
-    return this._registerCallback(this._onConnectCallbacks, callback);
-  }
-  /**
-   * Registers a callback for when the websocket disconnects.
-   *
-   * @example
-   * ```typescript
-   * const unlisten = client.onDisconnect(e => console.log(e));
-   * ```
-   */
-  onDisconnect(callback) {
-    return this._registerCallback(this._onDisconnectCallbacks, callback);
-  }
-  /**
-   * Registers a callback for when the websocket connection has been closed
-   * due to an error.
-   *
-   * @example
-   * ```typescript
-   * const unlisten = client.onError(e => console.error(e));
-   * ```
-   */
-  onError(callback) {
-    return this._registerCallback(this._onErrorCallbacks, callback);
-  }
-  /**
-   * Sends an IPC message and waits for a reply.
-   *
-   * @private
-   * @throws If message is invalid or connection to IPC server fails.
-   */
-  async _sendAndWaitReply(message) {
-    if (this._isManuallyClosed) {
-      throw new Error(
-        "Websocket connection was closed via `closeConnection`."
-      );
-    }
-    await this.connect();
-    const socket = await this._socketPromise;
-    return new Promise(async (resolve, reject) => {
-      socket.send(message, (error) => {
-        if (error) {
-          reject(error);
-        }
-      });
-      const unlisten = this.onMessage((e) => {
-        const serverMessage = JSON.parse(
-          e.data
-        );
-        const isReplyMessage = serverMessage.messageType === "client_response" && serverMessage.clientMessage === message;
-        if (isReplyMessage) {
-          unlisten();
-          if (serverMessage.error) {
-            reject(serverMessage.error);
-          } else {
-            resolve(serverMessage.data);
-          }
-        }
-      });
-    });
-  }
-  /**
-   * Utility function for registering a callback.
-   *
-   * @private
-   */
-  _registerCallback(callbacks2, newCallback) {
-    callbacks2.push(newCallback);
-    return () => {
-      for (const [index, callback] of callbacks2.entries()) {
-        if (callback === newCallback) {
-          callbacks2.splice(index, 1);
-        }
-      }
-    };
-  }
-  /**
-   * Instantiates `WebSocket` and adds event listeners for socket events.
-   *
-   * @private
-   */
-  async _createSocket() {
-    const WebSocketApi = await (globalThis.WebSocket ?? import("ws").then((ws) => ws.default).catch(() => {
-      throw new Error(
-        "The dependency 'ws' is required for environments without abuilt-in WebSocket API. \nRun `npm i ws` to resolve thiserror."
-      );
-    }));
-    const socket = new WebSocketApi(
-      `ws://localhost:${this._options?.port ?? this.DEFAULT_PORT}`
-    );
-    socket.onmessage = (e) => this._onMessageCallbacks.forEach((callback) => callback(e));
-    socket.onopen = (e) => this._onConnectCallbacks.forEach((callback) => callback(e));
-    socket.onerror = (e) => this._onErrorCallbacks.forEach((callback) => callback(e));
-    socket.onclose = (e) => {
-      this._onDisconnectCallbacks.forEach((callback) => callback(e));
-      if (!this._isManuallyClosed) {
-        setTimeout(
-          () => this._socketPromise = this._createSocket(),
-          this._options?.reconnectInterval ?? this.DEFAULT_RECONNECT_INTERVAL
-        );
-      }
-    };
-    return socket;
-  }
-  /**
-   * Waits for the websocket connection to be established.
-   *
-   * @private
-   * @throws On disconnect or close.
-   */
-  async _waitForConnection() {
-    const socket = await this._socketPromise;
-    if (!socket || socket.readyState === socket.CLOSED || socket.readyState === socket.CLOSING) {
-      throw new Error("Websocket connection is closed.");
-    }
-    if (socket.readyState === socket.OPEN) {
-      return socket;
-    }
-    return new Promise(async (resolve, reject) => {
-      function cleanup() {
-        if (unlistenConnect)
-          unlistenConnect();
-        if (unlistenDisconnect)
-          unlistenDisconnect();
-      }
-      const unlistenConnect = this.onConnect(() => {
-        cleanup();
-        resolve(socket);
-      });
-      const unlistenDisconnect = this.onDisconnect(() => {
-        cleanup();
-        reject(new Error("Failed to establish websocket connection."));
-      });
-    });
-  }
-  /**
-   * @private
-   * @throws If connection to IPC server fails.
-   */
-  async _sendSubscribe(events) {
-    const { subscriptionId } = await this._sendAndWaitReply(
-      `sub --events ${events.join(" ")}`
-    );
-    return subscriptionId;
-  }
-  /**
-   * @private
-   * @throws If connection to IPC server fails.
-   */
-  async _sendUnsubscribe(subscriptionId) {
-    await this._sendAndWaitReply(`unsub --id ${subscriptionId}`);
-  }
-};
-var WmEventType = /* @__PURE__ */ ((WmEventType2) => {
-  WmEventType2["ALL"] = "all";
-  WmEventType2["APPLICATION_EXITING"] = "application_exiting";
-  WmEventType2["BINDING_MODES_CHANGED"] = "binding_modes_changed";
-  WmEventType2["FOCUS_CHANGED"] = "focus_changed";
-  WmEventType2["FOCUSED_CONTAINER_MOVED"] = "focused_container_moved";
-  WmEventType2["MONITOR_ADDED"] = "monitor_added";
-  WmEventType2["MONITOR_UPDATED"] = "monitor_updated";
-  WmEventType2["MONITOR_REMOVED"] = "monitor_removed";
-  WmEventType2["TILING_DIRECTION_CHANGED"] = "tiling_direction_changed";
-  WmEventType2["USER_CONFIG_CHANGED"] = "user_config_changed";
-  WmEventType2["WINDOW_MANAGED"] = "window_managed";
-  WmEventType2["WINDOW_UNMANAGED"] = "window_unmanaged";
-  WmEventType2["WORKSPACE_ACTIVATED"] = "workspace_activated";
-  WmEventType2["WORKSPACE_DEACTIVATED"] = "workspace_deactivated";
-  WmEventType2["WORKSPACE_UPDATED"] = "workspace_updated";
-  WmEventType2["PAUSE_CHANGED"] = "pause_changed";
-  return WmEventType2;
-})(WmEventType || {});
-
-// dist/index.js
-var length = z.string().regex(
-  /^([+-]?\d+(?:\.\d+)?)(%|px)?$/,
-  "Not a valid length value. Must be of format '10px' or '10%'."
-);
-var name = z.string().min(2, "Name must be at least 2 characters.").max(28, "Name cannot exceed 28 characters.").regex(
-  /^[a-z0-9][a-z0-9-_]*$/,
-  "Only lowercase letters, numbers, and the characters - and _ are allowed."
-);
-var version = z.string().regex(
-  /^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$/,
-  'Version must be in the format "x.y.z" (e.g. "1.0.0").'
-);
-var widget = z.object({
-  name,
-  htmlPath: z.string().refine((path) => path.endsWith(".html"), {
-    message: 'Must be a valid HTML file path (e.g. "path/to/widget.html").'
-  }),
-  zOrder: z.enum(["normal", "top_most", "bottom_most"]),
-  shownInTaskbar: z.boolean(),
-  focused: z.boolean(),
-  resizable: z.boolean(),
-  transparent: z.boolean(),
-  includeFiles: z.array(z.string()).default([]),
-  caching: z.object({
-    defaultDuration: z.number(),
-    rules: z.array(
-      z.object({
-        urlRegex: z.string(),
-        duration: z.number()
-      })
-    )
-  }),
-  privileges: z.object({
-    shellCommands: z.array(
-      z.object({
-        program: z.string(),
-        argsRegex: z.string()
-      })
-    )
-  }),
-  presets: z.array(
-    z.object({
-      name: z.string(),
-      anchor: z.enum([
-        "top_left",
-        "top_center",
-        "top_right",
-        "center_left",
-        "center",
-        "center_right",
-        "bottom_left",
-        "bottom_center",
-        "bottom_right"
-      ]),
-      offsetX: length,
-      offsetY: length,
-      width: length,
-      height: length,
-      monitorSelection: z.union([
-        z.object({
-          type: z.literal("all")
-        }),
-        z.object({
-          type: z.literal("primary")
-        }),
-        z.object({
-          type: z.literal("secondary")
-        }),
-        z.object({
-          type: z.literal("index"),
-          match: z.number()
-        }),
-        z.object({
-          type: z.literal("name"),
-          match: z.string()
-        })
-      ]),
-      dockToEdge: z.object({
-        enabled: z.boolean(),
-        edge: z.enum(["top", "right", "bottom", "left"]).nullable(),
-        windowMargin: z.string()
-      })
-    })
-  )
-});
-var widgetPack = z.object({
-  name,
-  version,
-  description: z.string().max(1e3, "Description cannot exceed 1000 characters."),
-  tags: z.array(z.string()).max(10, "At most 10 tags are allowed."),
-  previewImages: z.array(
-    z.string().refine((url) => !url.startsWith("http"), {
-      message: "Preview image must be a file within the widget pack."
-    }).refine((url) => !url.includes(":\\") && !url.startsWith("/"), {
-      message: 'Preview image must be a relative file path (e.g. "resources/preview.png")'
-    })
-  ).min(1, "At least one preview image is required.").max(6, "At most 6 preview images are allowed."),
-  widgets: z.array(widget),
-  repositoryUrl: z.string().url().or(z.literal(""))
-});
-var configSchemas = {
-  length,
-  name,
-  version,
-  widget,
-  widgetPack
-};
-function createLogger(section) {
-  function log(consoleLogMethod, message, ...data) {
-    const date = /* @__PURE__ */ new Date();
-    const timestamp = `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}:${date.getSeconds().toString().padStart(2, "0")}:${date.getMilliseconds().toString().padStart(3, "0")}`;
-    console[consoleLogMethod](
-      `%c[Zebar] %c${timestamp}%c${section ? ` (${section})` : ""} %c${message}`,
-      "color: #4ade80",
-      "color: #f5f9b4",
-      "color: #d0b4f9",
-      "color: inherit",
-      ...data
-    );
-  }
-  function debug(message, ...data) {
-    log("log", message, ...data);
-  }
-  function info(message, ...data) {
-    log("log", message, ...data);
-  }
-  function warn(message, ...data) {
-    log("warn", message, ...data);
-  }
-  function error(message, ...data) {
-    log("error", message, ...data);
-  }
-  return {
-    debug,
-    info,
-    warn,
-    error
-  };
-}
-function getCoordinateDistance(pointA, pointB) {
-  return Math.sqrt(
-    Math.pow(pointB.x - pointA.x, 2) + Math.pow(pointB.y - pointA.y, 2)
-  );
-}
-function simpleHash(...args) {
-  return JSON.stringify(
-    args,
-    (_, val) => typeof val === "object" ? val : String(val)
-  );
-}
-var logger = createLogger();
-var desktopCommands = {
-  startWidget,
-  startWidgetPreset,
-  listenProvider,
-  unlistenProvider,
-  callProviderFunction,
-  setAlwaysOnTop,
-  setSkipTaskbar,
-  shellExec,
-  shellSpawn,
-  shellWrite,
-  shellKill
-};
-function startWidget(packId, widgetName, placement, isPreview) {
-  return invoke2("start_widget", {
-    packId,
-    widgetName,
-    placement,
-    isPreview
-  });
-}
-function startWidgetPreset(packId, widgetName, presetName, isPreview) {
-  return invoke2("start_widget_preset", {
-    packId,
-    widgetName,
-    presetName,
-    isPreview
-  });
-}
-function listenProvider(args) {
-  return invoke2("listen_provider", args);
-}
-function unlistenProvider(configHash) {
-  return invoke2("unlisten_provider", { configHash });
-}
-function callProviderFunction(configHash, fn) {
-  return invoke2("call_provider_function", {
-    configHash,
-    function: fn
-  });
-}
-function setAlwaysOnTop() {
-  return invoke2("set_always_on_top");
-}
-function setSkipTaskbar(skip) {
-  return invoke2("set_skip_taskbar", { skip });
-}
-function shellExec(program, args = [], options = {}) {
-  return invoke2("shell_exec", {
-    program,
-    args,
-    options
-  });
-}
-function shellSpawn(program, args = [], options = {}) {
-  return invoke2("shell_spawn", { program, args, options });
-}
-function shellWrite(processId, buffer) {
-  return invoke2("shell_write", { processId, buffer });
-}
-function shellKill(processId) {
-  return invoke2("shell_kill", { processId });
-}
-async function invoke2(command, args) {
-  logger.info(`Calling '${command}' with args:`, args ?? {});
-  try {
-    const response = await invoke(command, args);
-    logger.info(`Response for calling '${command}':`, response);
-    return response;
-  } catch (err) {
-    logger.error(`Command '${command}' failed: ${err}`);
-    throw new Error(`Command '${command}' failed: ${err}`);
-  }
-}
-var createCachePromise = null;
-async function getMonitors() {
-  return createCachePromise ?? (createCachePromise = createMonitorCache());
-}
-async function createMonitorCache() {
-  const [currentMonitor2, primaryMonitor2, allMonitors] = await Promise.all([
-    currentMonitor(),
-    primaryMonitor(),
-    availableMonitors()
-  ]);
-  const secondaryMonitors = allMonitors.filter(
-    (monitor) => !primaryMonitor2 || !isMatch(monitor, primaryMonitor2)
-  );
-  const monitorCache = {
-    currentMonitor: currentMonitor2 ? toMonitor(currentMonitor2) : null,
-    primaryMonitor: primaryMonitor2 ? toMonitor(primaryMonitor2) : null,
-    secondaryMonitors: secondaryMonitors.map(toMonitor),
-    allMonitors: allMonitors.map(toMonitor)
-  };
-  getCurrentWindow().onResized(() => updateCurrentMonitor());
-  getCurrentWindow().onMoved(() => updateCurrentMonitor());
-  async function updateCurrentMonitor() {
-    const currentMonitor22 = await currentMonitor();
-    Object.assign(monitorCache, {
-      currentMonitor: currentMonitor22 ? toMonitor(currentMonitor22) : null
-    });
-  }
-  return monitorCache;
-}
-function isMatch(monitorA, monitorB) {
-  return monitorA.name === monitorB.name && monitorA.position.x === monitorB.position.x && monitorA.position.y === monitorB.position.y && monitorA.size.width === monitorB.size.width && monitorA.size.height === monitorB.size.height;
-}
-function toMonitor(monitor) {
-  return {
-    name: monitor.name,
-    width: monitor.size.width,
-    height: monitor.size.height,
-    x: monitor.position.x,
-    y: monitor.position.y,
-    scaleFactor: monitor.scaleFactor
-  };
-}
-var listenPromise = null;
-var callbacks = [];
-async function onProviderEmit(config, callback) {
-  const configHash = simpleHash(config);
-  registerEventCallback(configHash, callback);
-  const unlisten = await (listenPromise ?? (listenPromise = listenProviderEmit()));
-  await desktopCommands.listenProvider({
-    configHash,
-    config
-  });
-  return async () => {
-    callbacks = callbacks.filter(
-      (callback2) => callback2.configHash !== configHash
-    );
-    await desktopCommands.unlistenProvider(configHash);
-    if (callbacks.length === 0) {
-      unlisten();
-      listenPromise = null;
-    }
-  };
-}
-function registerEventCallback(configHash, callback) {
-  const wrappedCallback = (event) => {
-    if (event.payload.configHash !== configHash) {
-      return;
-    }
-    callback(event.payload);
-  };
-  callbacks.push({ configHash, fn: wrappedCallback });
-}
-async function listenProviderEmit() {
-  return listen("provider-emit", (event) => {
-    callbacks.forEach((callback) => {
-      if (event.payload.configHash === callback.configHash) {
-        callback.fn(event);
-      }
-    });
-  });
-}
-async function shellExec2(program, args, options) {
-  return await desktopCommands.shellExec(program, args, options);
-}
-async function shellSpawn2(program, args, options) {
-  const processId = await desktopCommands.shellSpawn(
-    program,
-    args,
-    options
-  );
-  const stdoutCallbacks = [];
-  const stderrCallbacks = [];
-  const errorCallbacks = [];
-  const exitCallbacks = [];
-  const unlistenEvents = await listen(
-    "shell-emit",
-    (event) => {
-      if (event.payload.pid === processId) {
-        const shellEvent = event.payload.event;
-        switch (shellEvent.type) {
-          case "stdout":
-            stdoutCallbacks.forEach(
-              (callback) => callback(shellEvent.data)
-            );
-            break;
-          case "stderr":
-            stderrCallbacks.forEach(
-              (callback) => callback(shellEvent.data)
-            );
-            break;
-          case "error":
-            errorCallbacks.forEach((callback) => callback(shellEvent.data));
-            break;
-          case "terminated":
-            exitCallbacks.forEach((callback) => callback(shellEvent.data));
-            unlistenEvents();
-            break;
-        }
-      }
-    }
-  );
-  return {
-    processId,
-    onStdout: (callback) => stdoutCallbacks.push(callback),
-    onStderr: (callback) => stderrCallbacks.push(callback),
-    onExit: (callback) => exitCallbacks.push(callback),
-    kill: () => desktopCommands.shellKill(processId),
-    write: (data) => desktopCommands.shellWrite(processId, data)
-  };
-}
-function getWidgetState() {
-  if (window.__ZEBAR_STATE) {
-    return window.__ZEBAR_STATE;
-  }
-  const widgetState = sessionStorage.getItem("ZEBAR_STATE");
-  if (!widgetState) {
-    throw new Error("No widget state found.");
-  }
-  return JSON.parse(widgetState);
-}
-function currentWidget() {
-  const state = getWidgetState();
-  const tauriWindow = getCurrentWindow();
-  return {
-    id: state.id,
-    name: state.name,
-    packId: state.packId,
-    configPath: state.configPath,
-    htmlPath: state.htmlPath,
-    window: {
-      get tauri() {
-        return tauriWindow;
-      },
-      setZOrder: (zOrder) => setZOrder(tauriWindow, zOrder)
-    },
-    tauriWindow,
-    isPreview: state.isPreview,
-    setZOrder: (zOrder) => setZOrder(tauriWindow, zOrder),
-    close: () => close(tauriWindow)
-  };
-}
-async function setZOrder(window2, zOrder) {
-  if (zOrder === "bottom_most") {
-    await window2.setAlwaysOnBottom(true);
-  } else if (zOrder === "top_most") {
-    await desktopCommands.setAlwaysOnTop();
-  } else {
-    await window2.setAlwaysOnTop(false);
-  }
-}
-async function close(window2) {
-  await window2.close();
-}
-async function startWidget2(widgetName, placement, args) {
-  return desktopCommands.startWidget(
-    args?.packId ?? currentWidget().packId,
-    widgetName,
-    placement,
-    getWidgetState().isPreview
-  );
-}
-async function startWidgetPreset2(widgetName, presetName, args) {
-  return desktopCommands.startWidgetPreset(
-    args?.packId ?? currentWidget().packId,
-    widgetName,
-    presetName,
-    getWidgetState().isPreview
-  );
-}
-function createBaseProvider(config, fetcher) {
-  const logger2 = createLogger(config.type);
-  const outputListeners = /* @__PURE__ */ new Set();
-  const errorListeners = /* @__PURE__ */ new Set();
-  let latestEmission = {
-    output: null,
-    error: null,
-    hasError: false
-  };
-  let unlisten = startFetcher();
-  function startFetcher() {
-    return fetcher({
-      output: (output) => {
-        logger2.debug("Provider output:", output);
-        latestEmission = { output, error: null, hasError: false };
-        outputListeners.forEach((listener) => listener(output));
-      },
-      error: (error) => {
-        logger2.warn("Provider error:", error);
-        latestEmission = { output: null, error, hasError: true };
-        errorListeners.forEach((listener) => listener(error));
-      }
-    });
-  }
-  return {
-    get output() {
-      return latestEmission.output;
-    },
-    get error() {
-      return latestEmission.error;
-    },
-    get hasError() {
-      return latestEmission.hasError;
-    },
-    config,
-    restart: async () => {
-      if (unlisten) {
-        await (await unlisten)();
-      }
-      unlisten = startFetcher();
-    },
-    stop: async () => {
-      outputListeners.clear();
-      errorListeners.clear();
-      if (unlisten) {
-        await (await unlisten)();
-        unlisten = null;
-      }
-    },
-    onOutput: (callback) => {
-      outputListeners.add(callback);
-    },
-    onError: (callback) => {
-      errorListeners.add(callback);
-    }
-  };
-}
-var audioProviderConfigSchema = z.object({
-  type: z.literal("audio")
-});
-function createAudioProvider(config) {
-  const mergedConfig = audioProviderConfigSchema.parse(config);
-  return createBaseProvider(mergedConfig, async (queue) => {
-    return onProviderEmit(
-      mergedConfig,
-      ({ configHash, result }) => {
-        if ("error" in result) {
-          queue.error(result.error);
-        } else {
-          queue.output({
-            ...result.output,
-            setVolume: (volume, options) => {
-              return desktopCommands.callProviderFunction(configHash, {
-                type: "audio",
-                function: {
-                  name: "set_volume",
-                  args: { volume, deviceId: options?.deviceId }
-                }
-              });
-            },
-            setMute: (mute, options) => {
-              return desktopCommands.callProviderFunction(configHash, {
-                type: "audio",
-                function: {
-                  name: "set_mute",
-                  args: { mute, deviceId: options?.deviceId }
-                }
-              });
-            }
-          });
-        }
-      }
-    );
-  });
-}
-var batteryProviderConfigSchema = z.object({
-  type: z.literal("battery"),
-  refreshInterval: z.coerce.number().default(60 * 1e3)
-});
-function createBatteryProvider(config) {
-  const mergedConfig = batteryProviderConfigSchema.parse(config);
-  return createBaseProvider(mergedConfig, async (queue) => {
-    return onProviderEmit(mergedConfig, ({ result }) => {
-      if ("error" in result) {
-        queue.error(result.error);
-      } else {
-        queue.output(result.output);
-      }
-    });
-  });
-}
-var cpuProviderConfigSchema = z.object({
-  type: z.literal("cpu"),
-  refreshInterval: z.coerce.number().default(5 * 1e3)
-});
-function createCpuProvider(config) {
-  const mergedConfig = cpuProviderConfigSchema.parse(config);
-  return createBaseProvider(mergedConfig, async (queue) => {
-    return onProviderEmit(mergedConfig, ({ result }) => {
-      if ("error" in result) {
-        queue.error(result.error);
-      } else {
-        queue.output(result.output);
-      }
-    });
-  });
-}
+// src/providers/date/create-date-provider.ts
 var dateProviderConfigSchema = z.object({
   type: z.literal("date"),
   refreshInterval: z.coerce.number().default(1e3),
@@ -13128,139 +13158,305 @@ function createDateProvider(config) {
     };
   });
 }
+
+// src/providers/glazewm/glazewm-ipc.ts
+var DEFAULT_GLAZEWM_IPC_PORT = 6123;
+var GLAZEWM_REDISCOVERY_DELAYS_MS = [
+  0,
+  500,
+  1e3,
+  1500,
+  2e3,
+  2e3,
+  2e3
+];
+function isValidGlazeWmIpcPort(port) {
+  return Number.isInteger(port) && port >= 1 && port <= 65535;
+}
+function normalizeGlazeWmIpcPort(port) {
+  return isValidGlazeWmIpcPort(port) ? port : DEFAULT_GLAZEWM_IPC_PORT;
+}
+function decideGlazeWmReconnectAction(currentPort, discoveredPort) {
+  return currentPort === discoveredPort ? "keep" : "replace";
+}
+
+// src/providers/glazewm/create-glazewm-provider.ts
 var glazeWmProviderConfigSchema = z.object({
   type: z.literal("glazewm")
 });
 async function resolveGlazeWmIpcPort() {
-  const DEFAULT_PORT = 6123;
-  // No cmd.exe, no 6125-6133 probe. ipc.port file is authoritative.
   try {
-    const port = await invoke2("read_glazewm_ipc_port");
-    if (typeof port === "number" && Number.isFinite(port) && port > 0) {
-      console.info("[glazewm-ipc] resolve via fs command ->", port);
-      return port;
-    }
-  } catch (err) {
-    console.info("[glazewm-ipc] read_glazewm_ipc_port failed; default", DEFAULT_PORT, err);
+    return normalizeGlazeWmIpcPort(await readGlazeWmIpcPort());
+  } catch {
+    return DEFAULT_GLAZEWM_IPC_PORT;
   }
-  console.info("[glazewm-ipc] resolve default", DEFAULT_PORT);
-  return DEFAULT_PORT;
+}
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 function createGlazeWmProvider(config) {
   const mergedConfig = glazeWmProviderConfigSchema.parse(config);
   return createBaseProvider(mergedConfig, async (queue) => {
     const monitors = await getMonitors();
-    const port = await resolveGlazeWmIpcPort();
-    console.info("[glazewm-ipc] connect port=" + port);
-    const client = new WmClient({ port });
+    let disposed = false;
+    let generation = 0;
+    let recoveringGen = null;
+    let rediscoveryEpoch = 0;
+    let client = null;
+    let currentPort = DEFAULT_GLAZEWM_IPC_PORT;
     let unlistenEvents = null;
-    client.onDisconnect(
-      () => queue.error("Failed to connect to GlazeWM IPC server.")
-    );
-    client.onConnect(async () => {
-      let state = await getInitialState();
-      queue.output(state);
-      unlistenEvents ??= await client.subscribe(WmEventType.ALL, onEvent);
-      async function onEvent(e) {
-        switch (e.eventType) {
-          case WmEventType.BINDING_MODES_CHANGED: {
-            state = { ...state, bindingModes: e.newBindingModes };
-            break;
-          }
-          case WmEventType.FOCUS_CHANGED: {
-            state = { ...state, focusedContainer: e.focusedContainer };
-            state = { ...state, ...await getMonitorState() };
-            const { tilingDirection } = await client.queryTilingDirection();
-            state = { ...state, tilingDirection };
-            break;
-          }
-          case WmEventType.FOCUSED_CONTAINER_MOVED: {
-            state = { ...state, focusedContainer: e.focusedContainer };
-            state = { ...state, ...await getMonitorState() };
-            break;
-          }
-          case WmEventType.TILING_DIRECTION_CHANGED: {
-            state = { ...state, tilingDirection: e.newTilingDirection };
-            break;
-          }
-          case WmEventType.WORKSPACE_ACTIVATED:
-          case WmEventType.WORKSPACE_DEACTIVATED:
-          case WmEventType.WORKSPACE_UPDATED: {
-            state = { ...state, ...await getMonitorState() };
-            break;
-          }
-          case WmEventType.PAUSE_CHANGED: {
-            state = { ...state, isPaused: e.isPaused };
-            break;
-          }
+    function isActive(gen) {
+      return !disposed && gen === generation;
+    }
+    async function clearSubscription() {
+      const unlisten = unlistenEvents;
+      unlistenEvents = null;
+      if (!unlisten) {
+        return;
+      }
+      try {
+        await unlisten();
+      } catch {
+      }
+    }
+    async function disposeClient(target) {
+      await clearSubscription();
+      if (!target) {
+        return;
+      }
+      try {
+        await target.closeConnection();
+      } catch {
+      }
+    }
+    function attachClient(port, gen) {
+      console.info(`[glazewm-ipc] connect port=${port}`);
+      const next = new WmClient({ port });
+      client = next;
+      currentPort = port;
+      next.onDisconnect(() => {
+        if (!isActive(gen)) {
+          return;
+        }
+        console.info(`[glazewm-ipc] disconnected port=${port}`);
+        queue.error("Failed to connect to GlazeWM IPC server.");
+        void handleDisconnect(gen);
+      });
+      next.onConnect(async () => {
+        if (!isActive(gen) || client !== next) {
+          return;
+        }
+        rediscoveryEpoch += 1;
+        let state = await getInitialState();
+        if (!isActive(gen) || client !== next) {
+          return;
         }
         queue.output(state);
+        unlistenEvents ??= await next.subscribe(WmEventType.ALL, onEvent);
+        async function onEvent(e) {
+          if (!isActive(gen) || client !== next) {
+            return;
+          }
+          switch (e.eventType) {
+            case WmEventType.BINDING_MODES_CHANGED: {
+              state = { ...state, bindingModes: e.newBindingModes };
+              break;
+            }
+            case WmEventType.FOCUS_CHANGED: {
+              state = { ...state, focusedContainer: e.focusedContainer };
+              state = { ...state, ...await getMonitorState() };
+              if (!isActive(gen) || client !== next) {
+                return;
+              }
+              const tiling = await next.queryTilingDirection();
+              if (!isActive(gen) || client !== next) {
+                return;
+              }
+              const globalTilingDirection = tiling.globalTilingDirection ?? tiling.tilingDirection;
+              state = {
+                ...state,
+                tilingDirection: globalTilingDirection,
+                globalTilingDirection
+              };
+              break;
+            }
+            case WmEventType.FOCUSED_CONTAINER_MOVED: {
+              state = { ...state, focusedContainer: e.focusedContainer };
+              state = { ...state, ...await getMonitorState() };
+              break;
+            }
+            case WmEventType.TILING_DIRECTION_CHANGED: {
+              state = {
+                ...state,
+                tilingDirection: e.newTilingDirection,
+                globalTilingDirection: e.newTilingDirection
+              };
+              break;
+            }
+            default: {
+              const raw = e;
+              if (raw.eventType === "global_tiling_direction_changed" && raw.newTilingDirection) {
+                state = {
+                  ...state,
+                  tilingDirection: raw.newTilingDirection,
+                  globalTilingDirection: raw.newTilingDirection
+                };
+              }
+              break;
+            }
+            case WmEventType.WORKSPACE_ACTIVATED:
+            case WmEventType.WORKSPACE_DEACTIVATED:
+            case WmEventType.WORKSPACE_UPDATED: {
+              state = { ...state, ...await getMonitorState() };
+              break;
+            }
+            case WmEventType.PAUSE_CHANGED: {
+              state = { ...state, isPaused: e.isPaused };
+              break;
+            }
+          }
+          if (!isActive(gen) || client !== next) {
+            return;
+          }
+          queue.output(state);
+        }
+        function runCommand(command, subjectContainerId) {
+          return next.runCommand(command, subjectContainerId);
+        }
+        async function getInitialState() {
+          const { focused: focusedContainer } = await next.queryFocused();
+          const { bindingModes } = await next.queryBindingModes();
+          const tiling = await next.queryTilingDirection();
+          const globalTilingDirection = tiling.globalTilingDirection ?? tiling.tilingDirection;
+          const isPaused = await getIsPaused();
+          return {
+            ...await getMonitorState(),
+            focusedContainer,
+            tilingDirection: globalTilingDirection,
+            globalTilingDirection,
+            bindingModes,
+            isPaused,
+            runCommand
+          };
+        }
+        async function getIsPaused() {
+          try {
+            const { paused } = await next.queryPaused();
+            return paused;
+          } catch {
+            return false;
+          }
+        }
+        async function getMonitorState() {
+          const currentPosition = {
+            x: monitors.currentMonitor.x,
+            y: monitors.currentMonitor.y
+          };
+          const { monitors: glazeWmMonitors } = await next.queryMonitors();
+          const { windows: glazeWmWindows } = await next.queryWindows();
+          const currentGlazeWmMonitor = glazeWmMonitors.reduce(
+            (a, b) => getCoordinateDistance(currentPosition, a) < getCoordinateDistance(currentPosition, b) ? a : b
+          );
+          const focusedGlazeWmMonitor = glazeWmMonitors.find(
+            (monitor) => monitor.hasFocus
+          );
+          const allGlazeWmWorkspaces = glazeWmMonitors.flatMap(
+            (monitor) => monitor.children
+          );
+          const focusedGlazeWmWorkspace = focusedGlazeWmMonitor?.children.find(
+            (workspace) => workspace.hasFocus
+          );
+          const displayedGlazeWmWorkspace = currentGlazeWmMonitor.children.find(
+            (workspace) => workspace.isDisplayed
+          );
+          return {
+            displayedWorkspace: displayedGlazeWmWorkspace,
+            focusedWorkspace: focusedGlazeWmWorkspace,
+            currentWorkspaces: currentGlazeWmMonitor.children,
+            allWorkspaces: allGlazeWmWorkspaces,
+            focusedMonitor: focusedGlazeWmMonitor,
+            currentMonitor: currentGlazeWmMonitor,
+            allMonitors: glazeWmMonitors,
+            allWindows: glazeWmWindows
+          };
+        }
+      });
+      return next;
+    }
+    async function replaceClient(port) {
+      const previous = client;
+      generation += 1;
+      const gen = generation;
+      client = null;
+      await disposeClient(previous);
+      if (disposed) {
+        return;
       }
-      function runCommand(command, subjectContainerId) {
-        return client.runCommand(command, subjectContainerId);
+      attachClient(port, gen);
+    }
+    async function handleDisconnect(gen) {
+      if (!isActive(gen) || recoveringGen !== null) {
+        return;
       }
-      async function getInitialState() {
-        const { focused: focusedContainer } = await client.queryFocused();
-        const { bindingModes } = await client.queryBindingModes();
-        const { tilingDirection } = await client.queryTilingDirection();
-        const isPaused = await getIsPaused();
-        return {
-          ...await getMonitorState(),
-          focusedContainer,
-          tilingDirection,
-          bindingModes,
-          isPaused,
-          runCommand
-        };
-      }
-      async function getIsPaused() {
-        try {
-          const { paused } = await client.queryPaused();
-          return paused;
-        } catch {
-          return false;
+      recoveringGen = gen;
+      const epoch = ++rediscoveryEpoch;
+      let loggedKeep = false;
+      try {
+        for (const delayMs of GLAZEWM_REDISCOVERY_DELAYS_MS) {
+          if (!isActive(gen) || epoch !== rediscoveryEpoch) {
+            return;
+          }
+          if (delayMs > 0) {
+            await sleep(delayMs);
+          }
+          if (!isActive(gen) || epoch !== rediscoveryEpoch) {
+            return;
+          }
+          const discovered = await resolveGlazeWmIpcPort();
+          if (!isActive(gen) || epoch !== rediscoveryEpoch) {
+            return;
+          }
+          const action = decideGlazeWmReconnectAction(
+            currentPort,
+            discovered
+          );
+          if (action === "keep") {
+            if (!loggedKeep) {
+              console.info(
+                `[glazewm-ipc] reconnect port=${currentPort}`
+              );
+              loggedKeep = true;
+            }
+            continue;
+          }
+          console.info(
+            `[glazewm-ipc] discovered changed ${currentPort} -> ${discovered}`
+          );
+          await replaceClient(discovered);
+          return;
+        }
+      } finally {
+        if (recoveringGen === gen) {
+          recoveringGen = null;
         }
       }
-      async function getMonitorState() {
-        const currentPosition = {
-          x: monitors.currentMonitor.x,
-          y: monitors.currentMonitor.y
-        };
-        const { monitors: glazeWmMonitors } = await client.queryMonitors();
-        const { windows: glazeWmWindows } = await client.queryWindows();
-        const currentGlazeWmMonitor = glazeWmMonitors.reduce(
-          (a, b) => getCoordinateDistance(currentPosition, a) < getCoordinateDistance(currentPosition, b) ? a : b
-        );
-        const focusedGlazeWmMonitor = glazeWmMonitors.find(
-          (monitor) => monitor.hasFocus
-        );
-        const allGlazeWmWorkspaces = glazeWmMonitors.flatMap(
-          (monitor) => monitor.children
-        );
-        const focusedGlazeWmWorkspace = focusedGlazeWmMonitor?.children.find(
-          (workspace) => workspace.hasFocus
-        );
-        const displayedGlazeWmWorkspace = currentGlazeWmMonitor.children.find(
-          (workspace) => workspace.isDisplayed
-        );
-        return {
-          displayedWorkspace: displayedGlazeWmWorkspace,
-          focusedWorkspace: focusedGlazeWmWorkspace,
-          currentWorkspaces: currentGlazeWmMonitor.children,
-          allWorkspaces: allGlazeWmWorkspaces,
-          focusedMonitor: focusedGlazeWmMonitor,
-          currentMonitor: currentGlazeWmMonitor,
-          allMonitors: glazeWmMonitors,
-          allWindows: glazeWmWindows
-        };
-      }
-    });
-    return () => {
-      unlistenEvents?.();
-      client.closeConnection();
+    }
+    const initialPort = await resolveGlazeWmIpcPort();
+    generation = 1;
+    attachClient(initialPort, generation);
+    return async () => {
+      disposed = true;
+      generation += 1;
+      rediscoveryEpoch += 1;
+      recoveringGen = null;
+      const previous = client;
+      client = null;
+      await disposeClient(previous);
     };
   });
 }
+
+// src/providers/host/create-host-provider.ts
 var hostProviderConfigSchema = z.object({
   type: z.literal("host"),
   refreshInterval: z.coerce.number().default(60 * 1e3)
@@ -13277,6 +13473,8 @@ function createHostProvider(config) {
     });
   });
 }
+
+// src/providers/ip/create-ip-provider.ts
 var ipProviderConfigSchema = z.object({
   type: z.literal("ip"),
   refreshInterval: z.coerce.number().default(60 * 60 * 1e3)
@@ -13293,6 +13491,8 @@ function createIpProvider(config) {
     });
   });
 }
+
+// src/providers/keyboard/create-keyboard-provider.ts
 var keyboardProviderConfigSchema = z.object({
   type: z.literal("keyboard"),
   refreshInterval: z.coerce.number().default(1e3)
@@ -13309,6 +13509,8 @@ function createKeyboardProvider(config) {
     });
   });
 }
+
+// src/providers/komorebi/create-komorebi-provider.ts
 var komorebiProviderConfigSchema = z.object({
   type: z.literal("komorebi")
 });
@@ -13359,6 +13561,8 @@ function createKomorebiProvider(config) {
     );
   });
 }
+
+// src/providers/media/create-media-provider.ts
 var mediaProviderConfigSchema = z.object({
   type: z.literal("media")
 });
@@ -13425,6 +13629,8 @@ function createMediaProvider(config) {
     );
   });
 }
+
+// src/providers/memory/create-memory-provider.ts
 var memoryProviderConfigSchema = z.object({
   type: z.literal("memory"),
   refreshInterval: z.coerce.number().default(5 * 1e3)
@@ -13441,6 +13647,8 @@ function createMemoryProvider(config) {
     });
   });
 }
+
+// src/providers/network/create-network-provider.ts
 var networkProviderConfigSchema = z.object({
   type: z.literal("network"),
   refreshInterval: z.coerce.number().default(5 * 1e3)
@@ -13457,6 +13665,8 @@ function createNetworkProvider(config) {
     });
   });
 }
+
+// src/providers/weather/create-weather-provider.ts
 var weatherProviderConfigSchema = z.object({
   type: z.literal("weather"),
   latitude: z.coerce.number().optional(),
@@ -13475,6 +13685,8 @@ function createWeatherProvider(config) {
     });
   });
 }
+
+// src/providers/disk/create-disk-provider.ts
 var diskProviderConfigSchema = z.object({
   type: z.literal("disk"),
   refreshInterval: z.coerce.number().default(60 * 1e3)
@@ -13491,6 +13703,8 @@ function createDiskProvider(config) {
     });
   });
 }
+
+// src/providers/systray/create-systray-provider.ts
 var systrayProviderConfigSchema = z.object({
   type: z.literal("systray")
 });
@@ -13603,6 +13817,8 @@ function createSystrayProvider(config) {
     );
   });
 }
+
+// src/providers/create-provider.ts
 function createProvider(config) {
   switch (config.type) {
     case "audio":
@@ -13639,6 +13855,8 @@ function createProvider(config) {
       throw new Error("Not a supported provider type.");
   }
 }
+
+// src/providers/create-provider-group.ts
 function createProviderGroup(configMap) {
   const outputListeners = /* @__PURE__ */ new Set();
   const errorListeners = /* @__PURE__ */ new Set();
