@@ -315,7 +315,6 @@ fn listen_events(
             .await
         },
         Some(provider_emission) = emit_rx.recv() => {
-          info!("Provider emission: {:?}", provider_emission);
           let _ = app_handle.emit("provider-emit", provider_emission.clone());
           manager.update_cache(provider_emission).await;
           Ok(())
