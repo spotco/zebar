@@ -13202,6 +13202,9 @@ async function resolveGlazeWmIpcPort() {
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+function isGlazeWmProviderGenerationActive(disposed, expectedGeneration, currentGeneration, clientIsCurrent) {
+  return !disposed && expectedGeneration === currentGeneration && clientIsCurrent;
+}
 function createGlazeWmProvider(config) {
   const mergedConfig = glazeWmProviderConfigSchema.parse(config);
   return createBaseProvider(mergedConfig, async (queue) => {
@@ -13214,7 +13217,12 @@ function createGlazeWmProvider(config) {
     let currentPort = DEFAULT_GLAZEWM_IPC_PORT;
     let unlistenEvents = null;
     function isActive(gen) {
-      return !disposed && gen === generation;
+      return isGlazeWmProviderGenerationActive(
+        disposed,
+        gen,
+        generation,
+        true
+      );
     }
     async function clearSubscription() {
       const unlisten = unlistenEvents;
@@ -13286,6 +13294,9 @@ function createGlazeWmProvider(config) {
             case WmEventType.FOCUSED_CONTAINER_MOVED: {
               state = { ...state, focusedContainer: e.focusedContainer };
               state = { ...state, ...await getMonitorState() };
+              if (!isActive(gen) || client !== next) {
+                return;
+              }
               state = { ...state, ...await getTilingDirectionState() };
               break;
             }
@@ -13310,6 +13321,9 @@ function createGlazeWmProvider(config) {
             case WmEventType.WORKSPACE_DEACTIVATED:
             case WmEventType.WORKSPACE_UPDATED: {
               state = { ...state, ...await getMonitorState() };
+              if (!isActive(gen) || client !== next) {
+                return;
+              }
               state = { ...state, ...await getTilingDirectionState() };
               break;
             }

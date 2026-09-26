@@ -46,9 +46,6 @@ pub struct AppSettings {
   /// Handle to the Tauri application.
   app_handle: AppHandle,
 
-  /// Indicates if the settings file was created during initialization.
-  pub is_first_run: bool,
-
   /// Directory where config files are stored.
   pub config_dir: PathBuf,
 
@@ -104,14 +101,13 @@ impl AppSettings {
       fs::create_dir_all(dir)?;
     }
 
-    let (settings, is_first_run) =
+    let settings =
       Self::read_settings_or_init(&config_dir, &migration_file)?;
 
     let (settings_change_tx, _settings_change_rx) = broadcast::channel(16);
 
     Ok(Self {
       app_handle: app_handle.clone(),
-      is_first_run,
       config_dir: config_dir.canonicalize_pretty()?,
       webview_cache_dir: webview_cache_dir.canonicalize_pretty()?,
       marketplace_meta_dir: marketplace_meta_dir.canonicalize_pretty()?,
@@ -126,7 +122,7 @@ impl AppSettings {
 
   /// Re-evaluates app settings and broadcasts the change.
   pub async fn reload(&self) -> anyhow::Result<()> {
-    let (new_settings, _) =
+    let new_settings =
       Self::read_settings_or_init(&self.config_dir, &self.migration_file)?;
 
     {
@@ -141,12 +137,10 @@ impl AppSettings {
 
   /// Reads the app settings file or initializes it with the template.
   ///
-  /// Returns the parsed `AppSettingsValue` and a boolean indicating if
-  /// the settings file was created.
   fn read_settings_or_init(
     config_dir: &Path,
     migration_file: &Path,
-  ) -> anyhow::Result<(AppSettingsValue, bool)> {
+  ) -> anyhow::Result<AppSettingsValue> {
     // Apply any pending config migrations before reading the settings
     // file.
     apply_config_migrations(config_dir, migration_file)?;
@@ -160,7 +154,7 @@ impl AppSettings {
     }
 
     let settings = read_and_parse_json(&settings_path)?;
-    Ok((settings, !is_found))
+    Ok(settings)
   }
 
   /// Writes to the app settings file.
@@ -185,8 +179,8 @@ impl AppSettings {
 
   /// Initializes app settings to the given path.
   ///
-  /// `settings.json` is initialized with the spotcobuild default pack
-  /// (`spotco.tokyo-silence` / `bar`) when GlazeWM is present.
+  /// `settings.json` is initialized with the fork's embedded default pack
+  /// (`spotco.tokyo-silence` / `bar`).
   fn create_default(config_dir: &Path) -> anyhow::Result<()> {
     tracing::info!("Initializing app settings from default.",);
 
@@ -359,4 +353,3 @@ impl AppSettings {
     self.marketplace_meta_dir.join(format!("{}.json", pack_id))
   }
 }
-

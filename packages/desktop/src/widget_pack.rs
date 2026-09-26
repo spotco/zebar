@@ -70,6 +70,10 @@ pub struct WidgetPackConfig {
   /// Version of the pack.
   pub version: String,
 
+  /// Fork-controlled revision for embedded pack refreshes.
+  #[serde(default)]
+  pub build_revision: Option<String>,
+
   /// Description of the pack.
   #[serde(default)]
   pub description: String,

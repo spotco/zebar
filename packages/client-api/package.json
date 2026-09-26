@@ -22,6 +22,8 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts",
     "test": "tsx --test src/providers/glazewm/glazewm-ipc.test.ts",
+    "bundle:tokyo-silence": "node scripts/build-tokyo-silence-bundle.mjs",
+    "bundle:tokyo-silence:check": "node scripts/build-tokyo-silence-bundle.mjs --check",
     "dev": "pnpm build --watch src",
     "dev:local": "pnpm dev",
     "prepublishOnly": "pnpm build"

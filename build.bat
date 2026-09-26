@@ -90,9 +90,9 @@ echo Spotco build id: %SPOTCO_BUILD_ID%>> "%LOG%"
 
 echo.
 
-echo [1/3] pnpm i
+echo [1/4] pnpm i
 echo -----
-echo [1/3] pnpm i>> "%LOG%"
+echo [1/4] pnpm i>> "%LOG%"
 call pnpm i
 set "EC=!ERRORLEVEL!"
 if not "!EC!"=="0" (
@@ -105,9 +105,24 @@ if not "!EC!"=="0" (
 echo OK: dependencies>> "%LOG%"
 
 echo.
-echo [2/3] pnpm run --filter zebar --filter @zebar/settings-ui build
+echo [2/4] pnpm --filter zebar bundle:tokyo-silence:check
 echo -----
-echo [2/3] package builds>> "%LOG%"
+echo [2/4] vendored bundle check>> "%LOG%"
+call pnpm --filter zebar bundle:tokyo-silence:check
+set "EC=!ERRORLEVEL!"
+if not "!EC!"=="0" (
+  echo ERROR: vendored tokyo-silence bundle is stale.
+  echo ERROR: vendored bundle check failed>> "%LOG%"
+  echo.
+  if not defined BUILD_BAT_NOPAUSE pause
+  exit /b 1
+)
+echo OK: vendored bundle>> "%LOG%"
+
+echo.
+echo [3/4] pnpm run --filter zebar --filter @zebar/settings-ui build
+echo -----
+echo [3/4] package builds>> "%LOG%"
 call pnpm run --filter zebar --filter @zebar/settings-ui build
 set "EC=!ERRORLEVEL!"
 if not "!EC!"=="0" (
@@ -120,9 +135,9 @@ if not "!EC!"=="0" (
 echo OK: packages>> "%LOG%"
 
 echo.
-echo [3/3] pnpm --filter @zebar/desktop build
+echo [4/4] pnpm --filter @zebar/desktop build
 echo -----
-echo [3/3] desktop build>> "%LOG%"
+echo [4/4] desktop build>> "%LOG%"
 call pnpm --filter @zebar/desktop build
 set "EC=!ERRORLEVEL!"
 if not "!EC!"=="0" (

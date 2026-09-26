@@ -6,3 +6,5 @@
 
 Runtime diagnostics are written to `%USERPROFILE%\.glzr\zebar\zebar.log` and
 errors to `errors.log`; each file is capped at 2 MiB with one `.1` backup.
+Interactive CLI query results remain on stdout; the desktop runtime does not
+stream provider or IPC diagnostics to stdout.

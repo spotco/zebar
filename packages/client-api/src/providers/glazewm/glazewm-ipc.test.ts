@@ -10,6 +10,7 @@ import {
   parseGlazeWmIpcPortContents,
 } from './glazewm-ipc.ts';
 import { resolveGlazeWmTilingDirectionState } from './glazewm-provider-types.ts';
+import { isGlazeWmProviderGenerationActive } from './create-glazewm-provider.ts';
 
 describe('resolveGlazeWmTilingDirectionState', () => {
   it('keeps local and global directions independent', () => {
@@ -137,6 +138,27 @@ describe('generation cleanup guard', () => {
     emit(2, 200);
 
     assert.deepEqual(outputs, [100, 200]);
+  });
+
+  it('stops before the second read when replacement happens between reads', async () => {
+    let generation = 1;
+    let directionReads = 0;
+
+    async function handleTwoReads(): Promise<void> {
+      await Promise.resolve(); // getMonitorState()
+      if (
+        !isGlazeWmProviderGenerationActive(false, 1, generation, true)
+      ) {
+        return;
+      }
+      directionReads += 1; // getTilingDirectionState()
+    }
+
+    const pending = handleTwoReads();
+    generation = 2;
+    await pending;
+
+    assert.equal(directionReads, 0);
   });
 });
 

@@ -23,9 +23,6 @@ use crate::{
 /// Spotcobuild default bar pack (vendored tokyo-silence fork).
 pub const STARTER_PACK_ID: &str = "spotco.tokyo-silence";
 
-/// Upstream built-in starter (kept for reference / optional installs).
-pub const LEGACY_STARTER_PACK_ID: &str = "glzr-io.starter";
-
 /// Metadata about an installed marketplace widget pack.
 ///
 /// These are stored in `%userprofile%/.glzr/zebar/.marketplace`.
@@ -38,6 +35,10 @@ pub struct MarketplacePackMetadata {
   /// Version of the installed pack.
   pub version: String,
 
+  /// Embedded-pack revision, when the pack is maintained by the fork.
+  #[serde(default)]
+  pub build_revision: Option<String>,
+
   /// Installation timestamp, stored as seconds since epoch.
   pub installed_at: u64,
 }
@@ -47,6 +48,7 @@ impl MarketplacePackMetadata {
     Ok(Self {
       pack_id: pack_id.to_string(),
       version: version.to_string(),
+      build_revision: None,
       installed_at: SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .context("Failed to get timestamp.")?
@@ -82,11 +84,10 @@ impl MarketplaceInstaller {
       installed_tx,
     };
 
-    // Mimic installation of the spotcobuild default pack if this
-    // is the first run.
-    if installer.app_settings.is_first_run {
-      installer.install_starter_pack()?;
-    }
+    // Keep the embedded spotcobuild pack current for existing installs
+    // too. The settings file remains user-owned; only the embedded
+    // pack copy is refreshed when its version/revision changes.
+    installer.install_starter_pack_if_needed()?;
 
     Ok((Arc::new(installer), installed_rx))
   }
@@ -203,9 +204,9 @@ impl MarketplaceInstaller {
     Ok(())
   }
 
-  /// Installs the spotcobuild default pack from the embedded
+  /// Installs or refreshes the spotcobuild default pack from the embedded
   /// `tokyo-silence` resource (`spotco.tokyo-silence`).
-  fn install_starter_pack(&self) -> anyhow::Result<()> {
+  fn install_starter_pack_if_needed(&self) -> anyhow::Result<()> {
     let starter_pack_dir = self
       .app_handle
       .path()
@@ -216,26 +217,122 @@ impl MarketplaceInstaller {
       &starter_pack_dir.join("zpack.json"),
     )?;
 
+    let metadata_path = self
+      .app_settings
+      .marketplace_pack_metadata_path(STARTER_PACK_ID);
+    let installed_metadata = metadata_path
+      .is_file()
+      .then(|| {
+        read_and_parse_json::<MarketplacePackMetadata>(&metadata_path)
+      })
+      .transpose()?;
+
     let dest_dir = self.app_settings.marketplace_pack_download_dir(
       STARTER_PACK_ID,
       &pack_config.version,
     );
 
+    if !should_update_embedded_pack(
+      installed_metadata.as_ref(),
+      &pack_config,
+      dest_dir.is_dir(),
+    ) {
+      return Ok(());
+    }
+
     // Copy the starter pack files.
+    if dest_dir.exists() {
+      // Rebuild the embedded copy from scratch so removed or renamed files
+      // from a newer revision cannot survive in an older install
+      // directory.
+      fs::remove_dir_all(&dest_dir)?;
+    }
     fs::create_dir_all(&dest_dir)?;
     copy_dir_all(&starter_pack_dir, &dest_dir, true)?;
 
-    let metadata =
+    let mut metadata =
       MarketplacePackMetadata::new(STARTER_PACK_ID, &pack_config.version)?;
+    metadata.build_revision = pack_config.build_revision.clone();
 
     // Write metadata file.
     fs::write(
-      self
-        .app_settings
-        .marketplace_pack_metadata_path(STARTER_PACK_ID),
+      metadata_path,
       serde_json::to_string_pretty(&metadata)? + "\n",
     )?;
 
     Ok(())
+  }
+}
+
+fn should_update_embedded_pack(
+  installed: Option<&MarketplacePackMetadata>,
+  embedded: &WidgetPackConfig,
+  destination_exists: bool,
+) -> bool {
+  let Some(installed) = installed else {
+    return true;
+  };
+
+  installed.pack_id != STARTER_PACK_ID
+    || installed.version != embedded.version
+    || installed.build_revision != embedded.build_revision
+    || !destination_exists
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn embedded(version: &str, revision: Option<&str>) -> WidgetPackConfig {
+    WidgetPackConfig {
+      schema: None,
+      name: "tokyo-silence".into(),
+      version: version.into(),
+      build_revision: revision.map(str::to_string),
+      description: String::new(),
+      tags: Vec::new(),
+      preview_images: Vec::new(),
+      repository_url: String::new(),
+      widgets: Vec::new(),
+    }
+  }
+
+  fn metadata(
+    version: &str,
+    revision: Option<&str>,
+  ) -> MarketplacePackMetadata {
+    MarketplacePackMetadata {
+      pack_id: STARTER_PACK_ID.into(),
+      version: version.into(),
+      build_revision: revision.map(str::to_string),
+      installed_at: 0,
+    }
+  }
+
+  #[test]
+  fn existing_older_embedded_pack_is_refreshed() {
+    assert!(should_update_embedded_pack(
+      Some(&metadata("1.0.0", Some("old"))),
+      &embedded("1.0.1", Some("new")),
+      true,
+    ));
+  }
+
+  #[test]
+  fn matching_embedded_pack_is_not_recopied() {
+    assert!(!should_update_embedded_pack(
+      Some(&metadata("1.0.1", Some("new"))),
+      &embedded("1.0.1", Some("new")),
+      true,
+    ));
+  }
+
+  #[test]
+  fn missing_embedded_pack_is_recreated() {
+    assert!(should_update_embedded_pack(
+      Some(&metadata("1.0.1", Some("new"))),
+      &embedded("1.0.1", Some("new")),
+      false,
+    ));
   }
 }

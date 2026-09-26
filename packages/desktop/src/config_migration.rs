@@ -159,6 +159,7 @@ fn migrate_widget_config(config_dir: &Path) -> anyhow::Result<()> {
       )),
       name: sanitize_name(pack_dir_name),
       version: "0.0.0".to_string(),
+      build_revision: None,
       description: "".to_string(),
       tags: vec![],
       preview_images: vec![],
