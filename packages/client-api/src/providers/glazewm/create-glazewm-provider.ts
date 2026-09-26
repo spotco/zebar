@@ -51,7 +51,8 @@ export function createGlazeWmProvider(
     let disposed = false;
     /** Bumped on every client replacement / dispose so stale callbacks no-op. */
     let generation = 0;
-    let recovering = false;
+    /** Generation currently running rediscovery, or null if idle. */
+    let recoveringGen: number | null = null;
     let rediscoveryEpoch = 0;
     let client: WmClient | null = null;
     let currentPort = DEFAULT_GLAZEWM_IPC_PORT;
@@ -267,11 +268,11 @@ export function createGlazeWmProvider(
     }
 
     async function handleDisconnect(gen: number): Promise<void> {
-      if (!isActive(gen) || recovering) {
+      if (!isActive(gen) || recoveringGen !== null) {
         return;
       }
 
-      recovering = true;
+      recoveringGen = gen;
       const epoch = ++rediscoveryEpoch;
       let loggedKeep = false;
 
@@ -314,8 +315,12 @@ export function createGlazeWmProvider(
           return;
         }
       } finally {
-        if (gen === generation) {
-          recovering = false;
+        // Clear only if this recovery still owns the flag so a newer
+        // recovery cannot be clobbered. After replaceClient bumps
+        // generation, we still own recoveringGen === gen and must clear
+        // so the replacement client can rediscover on a later disconnect.
+        if (recoveringGen === gen) {
+          recoveringGen = null;
         }
       }
     }
@@ -328,7 +333,7 @@ export function createGlazeWmProvider(
       disposed = true;
       generation += 1;
       rediscoveryEpoch += 1;
-      recovering = false;
+      recoveringGen = null;
       const previous = client;
       client = null;
       await disposeClient(previous);

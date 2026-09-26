@@ -110,3 +110,64 @@ describe('generation cleanup guard', () => {
     assert.deepEqual(outputs, [100, 200]);
   });
 });
+
+describe('recovery ownership across sequential port changes', () => {
+  it('allows a second rediscovery after a successful replacement', async () => {
+    // Mirrors create-glazewm-provider handleDisconnect ownership:
+    // recoveringGen is owned by the gen that started recovery and must be
+    // cleared in finally when recoveringGen === gen (NOT gen === generation),
+    // otherwise the first replaceClient bump leaves recovering stuck and a
+    // later 6125 -> 6127 migration never runs.
+    let generation = 1;
+    let recoveringGen: number | null = null;
+    let currentPort = 6123;
+    const replacedPorts: number[] = [];
+
+    async function replaceClient(port: number): Promise<void> {
+      generation += 1;
+      currentPort = port;
+      replacedPorts.push(port);
+    }
+
+    async function handleDisconnect(
+      gen: number,
+      discovered: number,
+    ): Promise<void> {
+      if (gen !== generation || recoveringGen !== null) {
+        return;
+      }
+
+      recoveringGen = gen;
+      try {
+        const action = decideGlazeWmReconnectAction(currentPort, discovered);
+        if (action === 'replace') {
+          await replaceClient(discovered);
+          return;
+        }
+      } finally {
+        if (recoveringGen === gen) {
+          recoveringGen = null;
+        }
+      }
+    }
+
+    // First migration: 6123 -> 6125
+    await handleDisconnect(1, 6125);
+    assert.equal(currentPort, 6125);
+    assert.equal(generation, 2);
+    assert.equal(recoveringGen, null);
+
+    // Second migration on the replacement client: 6125 -> 6127
+    await handleDisconnect(2, 6127);
+    assert.equal(currentPort, 6127);
+    assert.equal(generation, 3);
+    assert.equal(recoveringGen, null);
+    assert.deepEqual(replacedPorts, [6125, 6127]);
+
+    // And again back toward default/fallback: 6127 -> 6123
+    await handleDisconnect(3, 6123);
+    assert.equal(currentPort, 6123);
+    assert.deepEqual(replacedPorts, [6125, 6127, 6123]);
+  });
+
+});
