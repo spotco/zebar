@@ -21,6 +21,7 @@ export const desktopCommands = {
   shellSpawn,
   shellWrite,
   shellKill,
+  readGlazeWmIpcPort,
 };
 
 export type ProviderFunction =
@@ -159,6 +160,14 @@ function shellWrite(
 
 function shellKill(processId: number): Promise<void> {
   return invoke<void>('shell_kill', { processId });
+}
+
+/**
+ * Read GlazeWM IPC port from ~/.glzr/glazewm/ipc.port via Tauri (no shell).
+ * Returns the port number, or 6123 when the file is missing/invalid.
+ */
+export function readGlazeWmIpcPort(): Promise<number> {
+  return invoke<number>('read_glazewm_ipc_port');
 }
 
 export interface ShellCommandOptions {

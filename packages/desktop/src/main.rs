@@ -124,6 +124,7 @@ async fn main() -> anyhow::Result<()> {
       commands::shell_spawn,
       commands::shell_write,
       commands::shell_kill,
+      commands::read_glazewm_ipc_port,
     ])
     .build(tauri::generate_context!())?;
 
