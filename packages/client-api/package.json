@@ -24,6 +24,8 @@
     "test": "tsx --test src/providers/glazewm/glazewm-ipc.test.ts",
     "bundle:tokyo-silence": "node scripts/build-tokyo-silence-bundle.mjs",
     "bundle:tokyo-silence:check": "node scripts/build-tokyo-silence-bundle.mjs --check",
+    "pack:tokyo-silence:revision": "node scripts/check-tokyo-silence-revision.mjs",
+    "pack:tokyo-silence:revision:check": "node scripts/check-tokyo-silence-revision.mjs --check",
     "dev": "pnpm build --watch src",
     "dev:local": "pnpm dev",
     "prepublishOnly": "pnpm build"

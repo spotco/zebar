@@ -90,9 +90,9 @@ echo Spotco build id: %SPOTCO_BUILD_ID%>> "%LOG%"
 
 echo.
 
-echo [1/4] pnpm i
+echo [1/5] pnpm i
 echo -----
-echo [1/4] pnpm i>> "%LOG%"
+echo [1/5] pnpm i>> "%LOG%"
 call pnpm i
 set "EC=!ERRORLEVEL!"
 if not "!EC!"=="0" (
@@ -105,9 +105,9 @@ if not "!EC!"=="0" (
 echo OK: dependencies>> "%LOG%"
 
 echo.
-echo [2/4] pnpm --filter zebar bundle:tokyo-silence:check
+echo [2/5] pnpm --filter zebar bundle:tokyo-silence:check
 echo -----
-echo [2/4] vendored bundle check>> "%LOG%"
+echo [2/5] vendored bundle check>> "%LOG%"
 call pnpm --filter zebar bundle:tokyo-silence:check
 set "EC=!ERRORLEVEL!"
 if not "!EC!"=="0" (
@@ -120,9 +120,24 @@ if not "!EC!"=="0" (
 echo OK: vendored bundle>> "%LOG%"
 
 echo.
-echo [3/4] pnpm run --filter zebar --filter @zebar/settings-ui build
+echo [3/5] pnpm --filter zebar pack:tokyo-silence:revision:check
 echo -----
-echo [3/4] package builds>> "%LOG%"
+echo [3/5] embedded pack revision check>> "%LOG%"
+call pnpm --filter zebar pack:tokyo-silence:revision:check
+set "EC=!ERRORLEVEL!"
+if not "!EC!"=="0" (
+  echo ERROR: embedded tokyo-silence pack revision is stale.
+  echo ERROR: embedded pack revision check failed>> "%LOG%"
+  echo.
+  if not defined BUILD_BAT_NOPAUSE pause
+  exit /b 1
+)
+echo OK: embedded pack revision>> "%LOG%"
+
+echo.
+echo [4/5] pnpm run --filter zebar --filter @zebar/settings-ui build
+echo -----
+echo [4/5] package builds>> "%LOG%"
 call pnpm run --filter zebar --filter @zebar/settings-ui build
 set "EC=!ERRORLEVEL!"
 if not "!EC!"=="0" (
@@ -135,9 +150,9 @@ if not "!EC!"=="0" (
 echo OK: packages>> "%LOG%"
 
 echo.
-echo [4/4] pnpm --filter @zebar/desktop build
+echo [5/5] pnpm --filter @zebar/desktop build
 echo -----
-echo [4/4] desktop build>> "%LOG%"
+echo [5/5] desktop build>> "%LOG%"
 call pnpm --filter @zebar/desktop build
 set "EC=!ERRORLEVEL!"
 if not "!EC!"=="0" (

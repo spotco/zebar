@@ -1,6 +1,6 @@
 use std::{
   fs::{self},
-  path::PathBuf,
+  path::{Path, PathBuf},
   sync::Arc,
   time::{SystemTime, UNIX_EPOCH},
 };
@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use tar::Archive;
 use tauri::{path::BaseDirectory, AppHandle, Manager};
 use tokio::{sync::mpsc, task};
+use uuid::Uuid;
 
 use crate::{
   app_settings::AppSettings,
@@ -220,12 +221,7 @@ impl MarketplaceInstaller {
     let metadata_path = self
       .app_settings
       .marketplace_pack_metadata_path(STARTER_PACK_ID);
-    let installed_metadata = metadata_path
-      .is_file()
-      .then(|| {
-        read_and_parse_json::<MarketplacePackMetadata>(&metadata_path)
-      })
-      .transpose()?;
+    let installed_metadata = read_embedded_pack_metadata(&metadata_path);
 
     let dest_dir = self.app_settings.marketplace_pack_download_dir(
       STARTER_PACK_ID,
@@ -240,27 +236,115 @@ impl MarketplaceInstaller {
       return Ok(());
     }
 
-    // Copy the starter pack files.
-    if dest_dir.exists() {
-      // Rebuild the embedded copy from scratch so removed or renamed files
-      // from a newer revision cannot survive in an older install
-      // directory.
-      fs::remove_dir_all(&dest_dir)?;
+    refresh_embedded_pack(
+      &starter_pack_dir,
+      &dest_dir,
+      &metadata_path,
+      &pack_config,
+    )
+  }
+}
+
+fn refresh_embedded_pack(
+  source_dir: &Path,
+  destination_dir: &Path,
+  metadata_path: &Path,
+  embedded_config: &WidgetPackConfig,
+) -> anyhow::Result<()> {
+  refresh_embedded_pack_with_copy(
+    source_dir,
+    destination_dir,
+    metadata_path,
+    embedded_config,
+    |source, destination| copy_dir_all(source, destination, true),
+  )
+}
+
+fn refresh_embedded_pack_with_copy<F>(
+  source_dir: &Path,
+  destination_dir: &Path,
+  metadata_path: &Path,
+  embedded_config: &WidgetPackConfig,
+  copy: F,
+) -> anyhow::Result<()>
+where
+  F: FnOnce(&Path, &Path) -> anyhow::Result<()>,
+{
+  let staging_dir = unique_sibling(destination_dir, "staging");
+  let backup_dir = unique_sibling(destination_dir, "backup");
+
+  let result = (|| {
+    copy(source_dir, &staging_dir)?;
+
+    // Validate the completed staged copy before touching the live pack.
+    let staged_config = read_and_parse_json::<WidgetPackConfig>(
+      &staging_dir.join("zpack.json"),
+    )?;
+    anyhow::ensure!(
+      staged_config.version == embedded_config.version
+        && staged_config.build_revision == embedded_config.build_revision,
+      "Staged embedded pack metadata does not match its source."
+    );
+
+    let had_destination = destination_dir.exists();
+    if had_destination {
+      fs::rename(destination_dir, &backup_dir)?;
     }
-    fs::create_dir_all(&dest_dir)?;
-    copy_dir_all(&starter_pack_dir, &dest_dir, true)?;
 
-    let mut metadata =
-      MarketplacePackMetadata::new(STARTER_PACK_ID, &pack_config.version)?;
-    metadata.build_revision = pack_config.build_revision.clone();
+    if let Err(error) = fs::rename(&staging_dir, destination_dir) {
+      if had_destination {
+        let _ = fs::rename(&backup_dir, destination_dir);
+      }
+      return Err(error.into());
+    }
 
-    // Write metadata file.
-    fs::write(
+    let mut metadata = MarketplacePackMetadata::new(
+      STARTER_PACK_ID,
+      &embedded_config.version,
+    )?;
+    metadata.build_revision = embedded_config.build_revision.clone();
+
+    // Metadata is written only after the new pack is in place. If this
+    // fails, restore the prior directory so startup still has a usable
+    // pack.
+    if let Err(error) = fs::write(
       metadata_path,
       serde_json::to_string_pretty(&metadata)? + "\n",
-    )?;
+    ) {
+      let _ = remove_path(destination_dir);
+      if had_destination {
+        let _ = fs::rename(&backup_dir, destination_dir);
+      }
+      return Err(error.into());
+    }
+
+    if had_destination {
+      remove_path(&backup_dir)?;
+    }
 
     Ok(())
+  })();
+
+  if staging_dir.exists() {
+    let _ = remove_path(&staging_dir);
+  }
+
+  result
+}
+
+fn unique_sibling(path: &Path, purpose: &str) -> PathBuf {
+  let name = path
+    .file_name()
+    .and_then(|name| name.to_str())
+    .unwrap_or("embedded-pack");
+  path.with_file_name(format!(".{name}.{purpose}-{}", Uuid::new_v4()))
+}
+
+fn remove_path(path: &Path) -> std::io::Result<()> {
+  if path.is_dir() {
+    fs::remove_dir_all(path)
+  } else {
+    fs::remove_file(path)
   }
 }
 
@@ -279,8 +363,29 @@ fn should_update_embedded_pack(
     || !destination_exists
 }
 
+fn read_embedded_pack_metadata(
+  metadata_path: &Path,
+) -> Option<MarketplacePackMetadata> {
+  if !metadata_path.is_file() {
+    return None;
+  }
+
+  match read_and_parse_json::<MarketplacePackMetadata>(metadata_path) {
+    Ok(metadata) => Some(metadata),
+    Err(error) => {
+      tracing::warn!(
+        "Ignoring malformed embedded-pack metadata at {}: {error:#}",
+        metadata_path.display()
+      );
+      None
+    }
+  }
+}
+
 #[cfg(test)]
 mod tests {
+  use std::{fs, path::Path};
+
   use super::*;
 
   fn embedded(version: &str, revision: Option<&str>) -> WidgetPackConfig {
@@ -334,5 +439,57 @@ mod tests {
       &embedded("1.0.1", Some("new")),
       false,
     ));
+  }
+
+  #[test]
+  fn malformed_embedded_metadata_is_ignored() {
+    let path = std::env::temp_dir().join(format!(
+      "zebar-malformed-pack-metadata-{}.json",
+      Uuid::new_v4()
+    ));
+    fs::write(&path, "not json").expect("write malformed metadata");
+
+    assert!(read_embedded_pack_metadata(&path).is_none());
+    fs::remove_file(path).expect("remove malformed metadata");
+  }
+
+  #[test]
+  fn failed_embedded_pack_copy_preserves_existing_install() {
+    let root = std::env::temp_dir()
+      .join(format!("zebar-pack-refresh-failure-{}", Uuid::new_v4()));
+    let destination = root.join("spotco.tokyo-silence@1.0.1");
+    let metadata_path = root.join("spotco.tokyo-silence.json");
+    fs::create_dir_all(&destination).expect("create old pack");
+    fs::write(destination.join("old.txt"), "keep me")
+      .expect("write old pack");
+
+    let old_metadata = metadata("1.0.1", Some("old"));
+    fs::write(
+      &metadata_path,
+      serde_json::to_string_pretty(&old_metadata)
+        .expect("serialize metadata"),
+    )
+    .expect("write old metadata");
+
+    let result = refresh_embedded_pack_with_copy(
+      Path::new("missing-source"),
+      &destination,
+      &metadata_path,
+      &embedded("1.0.1", Some("new")),
+      |_, _| Err(anyhow::anyhow!("simulated copy failure")),
+    );
+
+    assert!(result.is_err());
+    assert_eq!(
+      fs::read_to_string(destination.join("old.txt")).expect("old pack"),
+      "keep me"
+    );
+    assert_eq!(
+      read_and_parse_json::<MarketplacePackMetadata>(&metadata_path)
+        .expect("old metadata")
+        .build_revision,
+      Some("old".into())
+    );
+    fs::remove_dir_all(root).expect("remove test data");
   }
 }

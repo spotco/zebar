@@ -41,25 +41,19 @@ pub fn copy_dir_all(
 ) -> anyhow::Result<()> {
   fs::create_dir_all(dest_dir)?;
 
-  visit_deep(src_dir, &mut |entry| {
-    let Ok(dest_path) = entry
-      .path()
-      .strip_prefix(src_dir)
-      .map(|rel_path| dest_dir.join(rel_path))
-    else {
-      return;
-    };
+  for entry in fs::read_dir(src_dir)? {
+    let entry = entry?;
+    let source_path = entry.path();
+    let dest_path = dest_dir.join(entry.file_name());
 
-    if entry.path().is_dir() {
-      if let Err(err) = fs::create_dir_all(&dest_path) {
-        error!("Failed to create directory: {}", err);
-      }
+    if source_path.is_dir() {
+      copy_dir_all(&source_path, &dest_path, override_existing)?;
     } else if override_existing || !dest_path.exists() {
-      if let Err(err) = fs::copy(entry.path(), dest_path) {
-        error!("Failed to copy file: {}", err);
-      }
+      fs::copy(source_path, dest_path)?;
     }
-  })
+  }
+
+  Ok(())
 }
 
 /// Recursively visit files in a directory.
