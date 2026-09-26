@@ -14,8 +14,8 @@ if /I "%~1"=="start-widget-preset" (
   start "" "%EXE%" %*
   exit /b 0
 )
-REM Default: start the tokyo-silence bar preset used in glazewm config
-start "" "%EXE%" start-widget-preset --pack y4m3.tokyo-silence --widget-name bar --preset default
+REM Default: start the vendored spotcobuild bar preset used in glazewm config
+start "" "%EXE%" start-widget-preset --pack spotco.tokyo-silence --widget-name bar --preset default
 exit /b 0
 
 :widget

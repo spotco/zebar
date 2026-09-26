@@ -7,6 +7,8 @@ set "REPO=F:\dev\zebar"
 
 if /I "%~1"=="--help" goto :usage
 if /I "%~1"=="-h" goto :usage
+set "START_AFTER=0"
+if /I "%~1"=="--start" set "START_AFTER=1"
 
 if not exist "%REL%\zebar.exe" (
   echo ERROR: Missing "%REL%\zebar.exe" - run build.bat first.
@@ -41,6 +43,10 @@ echo Tip: start Zebar ONLY with a quoted path (or start_zebar.cmd):
 echo   "%INSTALL%\zebar.exe"
 echo   "%REPO%\scripts\deploy\start_zebar.cmd"
 echo Never: start C:\Program Files\...  (unquoted -^> C:\Program popup)
+if "%START_AFTER%"=="1" (
+  echo Starting spotcobuild Zebar bar...
+  start "" "%INSTALL%\zebar.exe" start-widget-preset --pack spotco.tokyo-silence --widget-name bar --preset default
+)
 exit /b 0
 
 :copyfail
@@ -51,7 +57,8 @@ echo Then re-run deploy_build.cmd
 exit /b 1
 
 :usage
-echo Usage: deploy_build.cmd
+echo Usage: deploy_build.cmd [--start]
 echo Copies release zebar.exe (+ desktop resources) from %REL% into %INSTALL%
+echo --start also launches the spotco.tokyo-silence bar after deployment.
 echo Requires one-time grant_install_write_access.cmd
 exit /b 0

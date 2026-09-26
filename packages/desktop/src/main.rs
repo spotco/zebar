@@ -36,6 +36,7 @@ use crate::{
 
 mod app_settings;
 mod asset_server;
+mod bounded_log;
 mod cli;
 mod commands;
 mod common;
@@ -418,24 +419,28 @@ async fn open_widgets_by_cli_command(
 
 /// Initialize logging with the verbosity level specified in the CLI args.
 ///
-/// Error logs are saved to `~/.glzr/zebar/errors.log`.
+/// Runtime logs are saved to bounded files under `~/.glzr/zebar/` instead
+/// of being written to stdout. Errors are kept in a separate bounded file.
 fn setup_logging(cli: &Cli, config_dir: &Path) -> anyhow::Result<()> {
   let log_level = match cli.command() {
     CliCommand::Startup(args) => args.verbosity.level(),
     _ => Level::INFO,
   };
 
-  let error_writer =
-    tracing_appender::rolling::never(config_dir, "errors.log");
+  let runtime_writer =
+    bounded_log::create(config_dir.join("zebar.log"))
+      .with_context(|| "Unable to create Zebar runtime log.")?;
+  let error_writer = bounded_log::create(config_dir.join("errors.log"))
+    .with_context(|| "Unable to create Zebar error log.")?;
 
   let subscriber = tracing_subscriber::registry()
     .with(
-      // Output to stdout with specified verbosity level.
+      // Keep useful runtime diagnostics in the bounded runtime log.
       fmt::Layer::new()
-        .with_writer(std::io::stdout.with_max_level(log_level)),
+        .with_writer(runtime_writer.with_max_level(log_level)),
     )
     .with(
-      // Output to error log file.
+      // Keep errors separately available for quick triage.
       fmt::Layer::new()
         .with_writer(error_writer.with_max_level(Level::ERROR)),
     );
