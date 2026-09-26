@@ -31,13 +31,13 @@ const glazeWmProviderConfigSchema = z.object({
 async function resolveGlazeWmIpcPort(): Promise<number> {
   const DEFAULT_PORT = 6123;
   try {
-    // GlazeWM writes ~/.glzr/glazewm/ipc.port when bound off the default
-    // (ghost LISTENING on 6123). Official WmClient defaults to 6123 only.
+    // Forward slashes so JS string escapes cannot eat path separators.
+    // Widget capabilities may lack shell exec — then we probe below.
     const result = await shellExec('cmd', [
       '/d',
       '/s',
       '/c',
-      'if exist "%USERPROFILE%\.glzr\glazewm\ipc.port" (type "%USERPROFILE%\.glzr\glazewm\ipc.port")',
+      'if exist "%USERPROFILE%/.glzr/glazewm/ipc.port" (type "%USERPROFILE%/.glzr/glazewm/ipc.port")',
     ]);
     const raw = String(result.stdout ?? '').trim();
     const port = Number.parseInt(raw, 10);
@@ -45,10 +45,56 @@ async function resolveGlazeWmIpcPort(): Promise<number> {
       return port;
     }
   } catch {
-    // Missing shell permission or file: fall back to default.
+    // Missing shell permission or file: fall through to probe.
+  }
+  // Prefer fallback range before DEFAULT — ghost LISTENING often owns 6123.
+  // Skip 6124 (Zebar asset server).
+  for (const port of [6125, 6126, 6127, 6128, 6129, 6130, 6131, 6132, 6133]) {
+    if (await probeTcpPort(port)) {
+      return port;
+    }
   }
   return DEFAULT_PORT;
 }
+
+function probeTcpPort(port: number): Promise<boolean> {
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = (v: boolean) => {
+      if (!settled) {
+        settled = true;
+        resolve(v);
+      }
+    };
+    try {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+      const timer = setTimeout(() => {
+        try {
+          ws.close();
+        } catch {
+          /* ignore */
+        }
+        finish(false);
+      }, 250);
+      ws.onopen = () => {
+        clearTimeout(timer);
+        try {
+          ws.close();
+        } catch {
+          /* ignore */
+        }
+        finish(true);
+      };
+      ws.onerror = () => {
+        clearTimeout(timer);
+        finish(false);
+      };
+    } catch {
+      finish(false);
+    }
+  });
+}
+
 
 export function createGlazeWmProvider(
   config: GlazeWmProviderConfig,
