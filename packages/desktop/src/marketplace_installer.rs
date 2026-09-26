@@ -20,7 +20,11 @@ use crate::{
 };
 
 /// The ID of the built-in starter pack.
-pub const STARTER_PACK_ID: &str = "glzr-io.starter";
+/// Spotcobuild default bar pack (vendored tokyo-silence fork).
+pub const STARTER_PACK_ID: &str = "spotco.tokyo-silence";
+
+/// Upstream built-in starter (kept for reference / optional installs).
+pub const LEGACY_STARTER_PACK_ID: &str = "glzr-io.starter";
 
 /// Metadata about an installed marketplace widget pack.
 ///
@@ -78,7 +82,7 @@ impl MarketplaceInstaller {
       installed_tx,
     };
 
-    // Mimic installation of the `glzr-io.starter` widget pack if this
+    // Mimic installation of the spotcobuild default pack if this
     // is the first run.
     if installer.app_settings.is_first_run {
       installer.install_starter_pack()?;
@@ -199,13 +203,13 @@ impl MarketplaceInstaller {
     Ok(())
   }
 
-  /// Installs the `glzr-io.starter` widget pack from the embedded
-  /// `starter` resource.
+  /// Installs the spotcobuild default pack from the embedded
+  /// `tokyo-silence` resource (`spotco.tokyo-silence`).
   fn install_starter_pack(&self) -> anyhow::Result<()> {
     let starter_pack_dir = self
       .app_handle
       .path()
-      .resolve("../../resources/starter", BaseDirectory::Resource)
+      .resolve("../../resources/tokyo-silence", BaseDirectory::Resource)
       .context("Unable to resolve starter pack resource.")?;
 
     let pack_config = read_and_parse_json::<WidgetPackConfig>(

@@ -135,11 +135,18 @@ export function createGlazeWmProvider(
                 return;
               }
 
-              const { tilingDirection } = await next.queryTilingDirection();
+              const tiling = await next.queryTilingDirection();
               if (!isActive(gen) || client !== next) {
                 return;
               }
-              state = { ...state, tilingDirection };
+              const globalTilingDirection =
+                (tiling as { globalTilingDirection?: typeof tiling.tilingDirection })
+                  .globalTilingDirection ?? tiling.tilingDirection;
+              state = {
+                ...state,
+                tilingDirection: globalTilingDirection,
+                globalTilingDirection,
+              };
               break;
             }
             case WmEventType.FOCUSED_CONTAINER_MOVED: {
@@ -148,7 +155,26 @@ export function createGlazeWmProvider(
               break;
             }
             case WmEventType.TILING_DIRECTION_CHANGED: {
-              state = { ...state, tilingDirection: e.newTilingDirection };
+              state = {
+                ...state,
+                tilingDirection: e.newTilingDirection,
+                globalTilingDirection: e.newTilingDirection,
+              };
+              break;
+            }
+            default: {
+              // Spotcobuild: global_tiling_direction_changed (not yet in glazewm-js enum).
+              const raw = e as { eventType?: string; newTilingDirection?: typeof state.tilingDirection };
+              if (
+                raw.eventType === 'global_tiling_direction_changed' &&
+                raw.newTilingDirection
+              ) {
+                state = {
+                  ...state,
+                  tilingDirection: raw.newTilingDirection,
+                  globalTilingDirection: raw.newTilingDirection,
+                };
+              }
               break;
             }
             case WmEventType.WORKSPACE_ACTIVATED:
@@ -179,13 +205,17 @@ export function createGlazeWmProvider(
         async function getInitialState() {
           const { focused: focusedContainer } = await next.queryFocused();
           const { bindingModes } = await next.queryBindingModes();
-          const { tilingDirection } = await next.queryTilingDirection();
+          const tiling = await next.queryTilingDirection();
+          const globalTilingDirection =
+            (tiling as { globalTilingDirection?: typeof tiling.tilingDirection })
+              .globalTilingDirection ?? tiling.tilingDirection;
           const isPaused = await getIsPaused();
 
           return {
             ...(await getMonitorState()),
             focusedContainer,
-            tilingDirection,
+            tilingDirection: globalTilingDirection,
+            globalTilingDirection,
             bindingModes,
             isPaused,
             runCommand,

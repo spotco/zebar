@@ -66,9 +66,16 @@ export interface GlazeWmOutput {
   focusedContainer: Container;
 
   /**
-   * Tiling direction of the focused container.
+   * Tiling direction of the focused container (legacy).
+   * Spotcobuild chips should prefer `globalTilingDirection`.
    */
   tilingDirection: TilingDirection;
+
+  /**
+   * WM-wide insertion / stack axis (spotcobuild).
+   * Falls back to `tilingDirection` when the WM build omits it.
+   */
+  globalTilingDirection: TilingDirection;
 
   /**
    * Active binding modes;

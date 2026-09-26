@@ -185,9 +185,8 @@ impl AppSettings {
 
   /// Initializes app settings to the given path.
   ///
-  /// `settings.json` is initialized with either `vanilla` or
-  /// `with-glazewm` from the `glzr-io/starter` widget pack as
-  /// startup config.
+  /// `settings.json` is initialized with the spotcobuild default pack
+  /// (`spotco.tokyo-silence` / `bar`) when GlazeWM is present.
   fn create_default(config_dir: &Path) -> anyhow::Result<()> {
     tracing::info!("Initializing app settings from default.",);
 
@@ -198,10 +197,8 @@ impl AppSettings {
       )),
       startup_configs: vec![StartupConfig {
         pack: STARTER_PACK_ID.into(),
-        widget: match is_app_installed("glazewm") {
-          true => "with-glazewm".into(),
-          false => "vanilla".into(),
-        },
+        // tokyo-silence only ships the `bar` widget.
+        widget: "bar".into(),
         preset: "default".into(),
       }],
     };
