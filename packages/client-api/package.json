@@ -21,6 +21,7 @@
   ],
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts",
+    "test": "node --experimental-strip-types --test src/providers/glazewm/glazewm-ipc.test.ts",
     "dev": "pnpm build --watch src",
     "dev:local": "pnpm dev",
     "prepublishOnly": "pnpm build"

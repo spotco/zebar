@@ -1,31 +1,44 @@
 import {
   WmClient,
   WmEventType,
-  type BindingModesChangedEvent,
-  type FocusChangedEvent,
-  type FocusedContainerMovedEvent,
   type RunCommandResponse,
-  type TilingDirectionChangedEvent,
   type UnlistenFn,
-  type WorkspaceActivatedEvent,
-  type WorkspaceDeactivatedEvent,
-  type WorkspaceUpdatedEvent,
-  type PauseChangedEvent,
   type WmEvent,
 } from 'glazewm';
 import { z } from 'zod';
 
-import { getMonitors } from '~/desktop';
+import { getMonitors, readGlazeWmIpcPort } from '~/desktop';
 import { getCoordinateDistance } from '~/utils';
 import { createBaseProvider } from '../create-base-provider';
 import type {
   GlazeWmProvider,
   GlazeWmProviderConfig,
 } from './glazewm-provider-types';
+import {
+  DEFAULT_GLAZEWM_IPC_PORT,
+  GLAZEWM_REDISCOVERY_DELAYS_MS,
+  decideGlazeWmReconnectAction,
+  normalizeGlazeWmIpcPort,
+} from './glazewm-ipc';
 
 const glazeWmProviderConfigSchema = z.object({
   type: z.literal('glazewm'),
 });
+
+async function resolveGlazeWmIpcPort(): Promise<number> {
+  // Single source of truth: GlazeWM writes ~/.glzr/glazewm/ipc.port on bind.
+  // Read via Tauri (Rust fs) — no cmd.exe, no multi-port probe.
+  try {
+    return normalizeGlazeWmIpcPort(await readGlazeWmIpcPort());
+  } catch {
+    // Command missing / invoke failed: fall through to default.
+    return DEFAULT_GLAZEWM_IPC_PORT;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 export function createGlazeWmProvider(
   config: GlazeWmProviderConfig,
@@ -34,148 +47,291 @@ export function createGlazeWmProvider(
 
   return createBaseProvider(mergedConfig, async queue => {
     const monitors = await getMonitors();
-    const client = new WmClient();
+
+    let disposed = false;
+    /** Bumped on every client replacement / dispose so stale callbacks no-op. */
+    let generation = 0;
+    let recovering = false;
+    let rediscoveryEpoch = 0;
+    let client: WmClient | null = null;
+    let currentPort = DEFAULT_GLAZEWM_IPC_PORT;
     let unlistenEvents: null | UnlistenFn = null;
 
-    client.onDisconnect(() =>
-      queue.error('Failed to connect to GlazeWM IPC server.'),
-    );
+    function isActive(gen: number): boolean {
+      return !disposed && gen === generation;
+    }
 
-    client.onConnect(async () => {
-      let state = await getInitialState();
-      queue.output(state);
+    async function clearSubscription(): Promise<void> {
+      const unlisten = unlistenEvents;
+      unlistenEvents = null;
+      if (!unlisten) {
+        return;
+      }
+      try {
+        await unlisten();
+      } catch {
+        // Best-effort cleanup while tearing down a stale client.
+      }
+    }
 
-      unlistenEvents ??= await client.subscribe(WmEventType.ALL, onEvent);
+    async function disposeClient(target: WmClient | null): Promise<void> {
+      await clearSubscription();
+      if (!target) {
+        return;
+      }
+      try {
+        await target.closeConnection();
+      } catch {
+        // closeConnection may reject if the socket never opened.
+      }
+    }
 
-      // TODO: Update state when monitors change.
-      // monitors.onChange(async () => {
-      //   state = { ...state, ...(await getMonitorState()) };
-      //   queue.value(state);
-      // });
+    function attachClient(port: number, gen: number): WmClient {
+      console.info(`[glazewm-ipc] connect port=${port}`);
+      const next = new WmClient({ port });
+      client = next;
+      currentPort = port;
 
-      async function onEvent(e: WmEvent) {
-        switch (e.eventType) {
-          case WmEventType.BINDING_MODES_CHANGED: {
-            state = { ...state, bindingModes: e.newBindingModes };
-            break;
-          }
-          case WmEventType.FOCUS_CHANGED: {
-            state = { ...state, focusedContainer: e.focusedContainer };
-            state = { ...state, ...(await getMonitorState()) };
+      next.onDisconnect(() => {
+        if (!isActive(gen)) {
+          return;
+        }
+        console.info(`[glazewm-ipc] disconnected port=${port}`);
+        queue.error('Failed to connect to GlazeWM IPC server.');
+        void handleDisconnect(gen);
+      });
 
-            const { tilingDirection } =
-              await client.queryTilingDirection();
-            state = { ...state, tilingDirection };
-            break;
-          }
-          case WmEventType.FOCUSED_CONTAINER_MOVED: {
-            state = { ...state, focusedContainer: e.focusedContainer };
-            state = { ...state, ...(await getMonitorState()) };
-            break;
-          }
-          case WmEventType.TILING_DIRECTION_CHANGED: {
-            state = { ...state, tilingDirection: e.newTilingDirection };
-            break;
-          }
-          case WmEventType.WORKSPACE_ACTIVATED:
-          case WmEventType.WORKSPACE_DEACTIVATED:
-          case WmEventType.WORKSPACE_UPDATED: {
-            state = { ...state, ...(await getMonitorState()) };
-            break;
-          }
-          case WmEventType.PAUSE_CHANGED: {
-            state = { ...state, isPaused: e.isPaused };
-            break;
-          }
+      next.onConnect(async () => {
+        if (!isActive(gen) || client !== next) {
+          return;
         }
 
+        // Successful (re)connect cancels in-flight rediscovery for this gen.
+        rediscoveryEpoch += 1;
+
+        let state = await getInitialState();
+        if (!isActive(gen) || client !== next) {
+          return;
+        }
         queue.output(state);
+
+        unlistenEvents ??= await next.subscribe(WmEventType.ALL, onEvent);
+
+        async function onEvent(e: WmEvent) {
+          if (!isActive(gen) || client !== next) {
+            return;
+          }
+
+          switch (e.eventType) {
+            case WmEventType.BINDING_MODES_CHANGED: {
+              state = { ...state, bindingModes: e.newBindingModes };
+              break;
+            }
+            case WmEventType.FOCUS_CHANGED: {
+              state = { ...state, focusedContainer: e.focusedContainer };
+              state = { ...state, ...(await getMonitorState()) };
+              if (!isActive(gen) || client !== next) {
+                return;
+              }
+
+              const { tilingDirection } = await next.queryTilingDirection();
+              if (!isActive(gen) || client !== next) {
+                return;
+              }
+              state = { ...state, tilingDirection };
+              break;
+            }
+            case WmEventType.FOCUSED_CONTAINER_MOVED: {
+              state = { ...state, focusedContainer: e.focusedContainer };
+              state = { ...state, ...(await getMonitorState()) };
+              break;
+            }
+            case WmEventType.TILING_DIRECTION_CHANGED: {
+              state = { ...state, tilingDirection: e.newTilingDirection };
+              break;
+            }
+            case WmEventType.WORKSPACE_ACTIVATED:
+            case WmEventType.WORKSPACE_DEACTIVATED:
+            case WmEventType.WORKSPACE_UPDATED: {
+              state = { ...state, ...(await getMonitorState()) };
+              break;
+            }
+            case WmEventType.PAUSE_CHANGED: {
+              state = { ...state, isPaused: e.isPaused };
+              break;
+            }
+          }
+
+          if (!isActive(gen) || client !== next) {
+            return;
+          }
+          queue.output(state);
+        }
+
+        function runCommand(
+          command: string,
+          subjectContainerId?: string,
+        ): Promise<RunCommandResponse> {
+          return next.runCommand(command, subjectContainerId);
+        }
+
+        async function getInitialState() {
+          const { focused: focusedContainer } = await next.queryFocused();
+          const { bindingModes } = await next.queryBindingModes();
+          const { tilingDirection } = await next.queryTilingDirection();
+          const isPaused = await getIsPaused();
+
+          return {
+            ...(await getMonitorState()),
+            focusedContainer,
+            tilingDirection,
+            bindingModes,
+            isPaused,
+            runCommand,
+          };
+        }
+
+        // Paused state is only available on v3.7.0+ of GlazeWM.
+        async function getIsPaused() {
+          try {
+            const { paused } = await next.queryPaused();
+            return paused;
+          } catch {
+            return false;
+          }
+        }
+
+        async function getMonitorState() {
+          const currentPosition = {
+            x: monitors.currentMonitor!.x,
+            y: monitors.currentMonitor!.y,
+          };
+
+          const { monitors: glazeWmMonitors } = await next.queryMonitors();
+          const { windows: glazeWmWindows } = await next.queryWindows();
+
+          // Get GlazeWM monitor that corresponds to the widget's monitor.
+          const currentGlazeWmMonitor = glazeWmMonitors.reduce((a, b) =>
+            getCoordinateDistance(currentPosition, a) <
+            getCoordinateDistance(currentPosition, b)
+              ? a
+              : b,
+          );
+
+          const focusedGlazeWmMonitor = glazeWmMonitors.find(
+            monitor => monitor.hasFocus,
+          );
+
+          const allGlazeWmWorkspaces = glazeWmMonitors.flatMap(
+            monitor => monitor.children,
+          );
+
+          const focusedGlazeWmWorkspace =
+            focusedGlazeWmMonitor?.children.find(
+              workspace => workspace.hasFocus,
+            );
+
+          const displayedGlazeWmWorkspace =
+            currentGlazeWmMonitor.children.find(
+              workspace => workspace.isDisplayed,
+            );
+
+          return {
+            displayedWorkspace: displayedGlazeWmWorkspace!,
+            focusedWorkspace: focusedGlazeWmWorkspace!,
+            currentWorkspaces: currentGlazeWmMonitor.children,
+            allWorkspaces: allGlazeWmWorkspaces,
+            focusedMonitor: focusedGlazeWmMonitor!,
+            currentMonitor: currentGlazeWmMonitor,
+            allMonitors: glazeWmMonitors,
+            allWindows: glazeWmWindows,
+          };
+        }
+      });
+
+      return next;
+    }
+
+    async function replaceClient(port: number): Promise<void> {
+      const previous = client;
+      // Invalidate old callbacks before closing so reconnect/event races
+      // cannot update provider state after replacement.
+      generation += 1;
+      const gen = generation;
+      client = null;
+      await disposeClient(previous);
+      if (disposed) {
+        return;
+      }
+      attachClient(port, gen);
+    }
+
+    async function handleDisconnect(gen: number): Promise<void> {
+      if (!isActive(gen) || recovering) {
+        return;
       }
 
-      function runCommand(
-        command: string,
-        subjectContainerId?: string,
-      ): Promise<RunCommandResponse> {
-        return client.runCommand(command, subjectContainerId);
-      }
+      recovering = true;
+      const epoch = ++rediscoveryEpoch;
+      let loggedKeep = false;
 
-      async function getInitialState() {
-        const { focused: focusedContainer } = await client.queryFocused();
-        const { bindingModes } = await client.queryBindingModes();
-        const { tilingDirection } = await client.queryTilingDirection();
-        const isPaused = await getIsPaused();
+      try {
+        for (const delayMs of GLAZEWM_REDISCOVERY_DELAYS_MS) {
+          if (!isActive(gen) || epoch !== rediscoveryEpoch) {
+            return;
+          }
+          if (delayMs > 0) {
+            await sleep(delayMs);
+          }
+          if (!isActive(gen) || epoch !== rediscoveryEpoch) {
+            return;
+          }
 
-        return {
-          ...(await getMonitorState()),
-          focusedContainer,
-          tilingDirection,
-          bindingModes,
-          isPaused,
-          runCommand,
-        };
-      }
+          const discovered = await resolveGlazeWmIpcPort();
+          if (!isActive(gen) || epoch !== rediscoveryEpoch) {
+            return;
+          }
 
-      // Paused state is only available on v3.7.0+ of GlazeWM.
-      async function getIsPaused() {
-        try {
-          const { paused } = await client.queryPaused();
-          return paused;
-        } catch {
-          return false;
+          const action = decideGlazeWmReconnectAction(
+            currentPort,
+            discovered,
+          );
+
+          if (action === 'keep') {
+            if (!loggedKeep) {
+              console.info(
+                `[glazewm-ipc] reconnect port=${currentPort}`,
+              );
+              loggedKeep = true;
+            }
+            continue;
+          }
+
+          console.info(
+            `[glazewm-ipc] discovered changed ${currentPort} -> ${discovered}`,
+          );
+          await replaceClient(discovered);
+          return;
+        }
+      } finally {
+        if (gen === generation) {
+          recovering = false;
         }
       }
+    }
 
-      async function getMonitorState() {
-        const currentPosition = {
-          x: monitors.currentMonitor!.x,
-          y: monitors.currentMonitor!.y,
-        };
+    const initialPort = await resolveGlazeWmIpcPort();
+    generation = 1;
+    attachClient(initialPort, generation);
 
-        const { monitors: glazeWmMonitors } = await client.queryMonitors();
-        const { windows: glazeWmWindows } = await client.queryWindows();
-
-        // Get GlazeWM monitor that corresponds to the widget's monitor.
-        const currentGlazeWmMonitor = glazeWmMonitors.reduce((a, b) =>
-          getCoordinateDistance(currentPosition, a) <
-          getCoordinateDistance(currentPosition, b)
-            ? a
-            : b,
-        );
-
-        const focusedGlazeWmMonitor = glazeWmMonitors.find(
-          monitor => monitor.hasFocus,
-        );
-
-        const allGlazeWmWorkspaces = glazeWmMonitors.flatMap(
-          monitor => monitor.children,
-        );
-
-        const focusedGlazeWmWorkspace =
-          focusedGlazeWmMonitor?.children.find(
-            workspace => workspace.hasFocus,
-          );
-
-        const displayedGlazeWmWorkspace =
-          currentGlazeWmMonitor.children.find(
-            workspace => workspace.isDisplayed,
-          );
-
-        return {
-          displayedWorkspace: displayedGlazeWmWorkspace!,
-          focusedWorkspace: focusedGlazeWmWorkspace!,
-          currentWorkspaces: currentGlazeWmMonitor.children,
-          allWorkspaces: allGlazeWmWorkspaces,
-          focusedMonitor: focusedGlazeWmMonitor!,
-          currentMonitor: currentGlazeWmMonitor,
-          allMonitors: glazeWmMonitors,
-          allWindows: glazeWmWindows,
-        };
-      }
-    });
-
-    return () => {
-      unlistenEvents?.();
-      client.closeConnection();
+    return async () => {
+      disposed = true;
+      generation += 1;
+      rediscoveryEpoch += 1;
+      recovering = false;
+      const previous = client;
+      client = null;
+      await disposeClient(previous);
     };
   });
 }

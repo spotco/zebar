@@ -318,3 +318,111 @@ pub async fn shell_kill(
 ) -> anyhow::Result<(), String> {
   shell_state.kill(pid).map_err(|err| err.to_string())
 }
+
+/// Default GlazeWM IPC port when `ipc.port` is missing or invalid.
+const DEFAULT_GLAZEWM_IPC_PORT: u32 = 6123;
+
+/// Parse GlazeWM `ipc.port` file contents.
+///
+/// Accepts a trimmed decimal integer in `1..=65535`. Anything else is
+/// invalid.
+pub(crate) fn parse_glazewm_ipc_port_contents(raw: &str) -> Option<u32> {
+  let trimmed = raw.trim();
+  match trimmed.parse::<u32>() {
+    Ok(port) if (1..=65535).contains(&port) => Some(port),
+    _ => None,
+  }
+}
+
+/// Resolve a port from optional file contents (None = missing file).
+pub(crate) fn resolve_glazewm_ipc_port_from_contents(
+  raw: Option<&str>,
+) -> u32 {
+  raw
+    .and_then(parse_glazewm_ipc_port_contents)
+    .unwrap_or(DEFAULT_GLAZEWM_IPC_PORT)
+}
+
+/// Read GlazeWM IPC port from `%USERPROFILE%\.glzr\glazewm\ipc.port` (or
+/// `$HOME/...`). No shell, no console window. Missing/invalid file =>
+/// default 6123.
+#[tauri::command]
+pub fn read_glazewm_ipc_port() -> u32 {
+  let home =
+    std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
+  let Some(home) = home else {
+    tracing::info!("[glazewm-ipc] discovered fallback={DEFAULT_GLAZEWM_IPC_PORT} (no home)");
+    return DEFAULT_GLAZEWM_IPC_PORT;
+  };
+
+  let path = std::path::PathBuf::from(home)
+    .join(".glzr")
+    .join("glazewm")
+    .join("ipc.port");
+
+  let port = match std::fs::read_to_string(&path) {
+    Ok(raw) => resolve_glazewm_ipc_port_from_contents(Some(&raw)),
+    Err(_) => resolve_glazewm_ipc_port_from_contents(None),
+  };
+
+  tracing::info!("[glazewm-ipc] discovered port={port}");
+  port
+}
+
+#[cfg(test)]
+mod glazewm_ipc_port_tests {
+  use super::*;
+
+  #[test]
+  fn parse_6123() {
+    assert_eq!(parse_glazewm_ipc_port_contents("6123"), Some(6123));
+  }
+
+  #[test]
+  fn parse_whitespace() {
+    assert_eq!(parse_glazewm_ipc_port_contents("  6123\n"), Some(6123));
+  }
+
+  #[test]
+  fn parse_6125() {
+    assert_eq!(parse_glazewm_ipc_port_contents("6125"), Some(6125));
+  }
+
+  #[test]
+  fn reject_zero() {
+    assert_eq!(parse_glazewm_ipc_port_contents("0"), None);
+    assert_eq!(resolve_glazewm_ipc_port_from_contents(Some("0")), 6123);
+  }
+
+  #[test]
+  fn accept_65535() {
+    assert_eq!(parse_glazewm_ipc_port_contents("65535"), Some(65535));
+  }
+
+  #[test]
+  fn reject_65536() {
+    assert_eq!(parse_glazewm_ipc_port_contents("65536"), None);
+    assert_eq!(
+      resolve_glazewm_ipc_port_from_contents(Some("65536")),
+      6123
+    );
+  }
+
+  #[test]
+  fn reject_nonnumeric() {
+    assert_eq!(parse_glazewm_ipc_port_contents("abc"), None);
+    assert_eq!(resolve_glazewm_ipc_port_from_contents(Some("abc")), 6123);
+  }
+
+  #[test]
+  fn reject_empty() {
+    assert_eq!(parse_glazewm_ipc_port_contents(""), None);
+    assert_eq!(parse_glazewm_ipc_port_contents("   "), None);
+    assert_eq!(resolve_glazewm_ipc_port_from_contents(Some("")), 6123);
+  }
+
+  #[test]
+  fn missing_file_defaults() {
+    assert_eq!(resolve_glazewm_ipc_port_from_contents(None), 6123);
+  }
+}
