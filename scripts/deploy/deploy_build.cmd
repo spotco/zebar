@@ -3,6 +3,7 @@ setlocal EnableExtensions
 set "INSTALL=C:\Program Files\glzr.io\Zebar"
 set "REL=F:\dev\zebar\target\release"
 set "RES_SRC=F:\dev\zebar\packages\desktop\resources"
+set "PACK_SRC=F:\dev\zebar\resources\tokyo-silence"
 set "REPO=F:\dev\zebar"
 
 if /I "%~1"=="--help" goto :usage
@@ -12,6 +13,10 @@ if /I "%~1"=="--start" set "START_AFTER=1"
 
 if not exist "%REL%\zebar.exe" (
   echo ERROR: Missing "%REL%\zebar.exe" - run build.bat first.
+  exit /b 1
+)
+if not exist "%PACK_SRC%\zpack.json" (
+  echo ERROR: Missing vendored pack "%PACK_SRC%\zpack.json"
   exit /b 1
 )
 if not exist "%INSTALL%\" (
@@ -34,6 +39,15 @@ if exist "%RES_SRC%\initialization-script.js" (
   if exist "%RES_SRC%\normalize.css" copy /Y "%RES_SRC%\normalize.css" "%INSTALL%\resources\normalize.css" >nul
   if exist "%RES_SRC%\sw.js" copy /Y "%RES_SRC%\sw.js" "%INSTALL%\resources\sw.js" >nul
 )
+
+rem Tauri's Windows bundle resolves BaseDirectory::Resource to this nested
+rem path. Keep the drop-in deploy equivalent to installing the MSI by copying
+rem the embedded default pack there as well as the executable.
+set "PACK_DST=%INSTALL%\_up_\_up_\resources\tokyo-silence"
+if not exist "%INSTALL%\_up_\_up_\resources\" mkdir "%INSTALL%\_up_\_up_\resources"
+echo Copying vendored pack -^> "%PACK_DST%"
+robocopy "%PACK_SRC%" "%PACK_DST%" /E /COPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS /NP >nul
+if errorlevel 8 goto :copyfail
 
 echo.
 echo Deployed:
@@ -58,7 +72,7 @@ exit /b 1
 
 :usage
 echo Usage: deploy_build.cmd [--start]
-echo Copies release zebar.exe (+ desktop resources) from %REL% into %INSTALL%
+echo Copies release zebar.exe, desktop resources, and the vendored pack from %REL% into %INSTALL%
 echo --start also launches the spotco.tokyo-silence bar after deployment.
 echo Requires one-time grant_install_write_access.cmd
 exit /b 0
