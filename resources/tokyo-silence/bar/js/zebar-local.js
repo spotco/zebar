@@ -13288,8 +13288,7 @@ function createGlazeWmProvider(config) {
             case WmEventType.TILING_DIRECTION_CHANGED: {
               state = {
                 ...state,
-                tilingDirection: e.newTilingDirection,
-                globalTilingDirection: e.newTilingDirection
+                tilingDirection: e.newTilingDirection
               };
               break;
             }

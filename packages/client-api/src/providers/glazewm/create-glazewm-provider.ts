@@ -155,10 +155,11 @@ export function createGlazeWmProvider(
               break;
             }
             case WmEventType.TILING_DIRECTION_CHANGED: {
+              // Keep the legacy focused-container field separate. The
+              // WM-wide value is updated by GlobalTilingDirectionChanged.
               state = {
                 ...state,
                 tilingDirection: e.newTilingDirection,
-                globalTilingDirection: e.newTilingDirection,
               };
               break;
             }
