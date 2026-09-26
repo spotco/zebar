@@ -15,7 +15,7 @@ import {
 } from 'glazewm';
 import { z } from 'zod';
 
-import { getMonitors } from '~/desktop';
+import { getMonitors, shellExec } from '~/desktop';
 import { getCoordinateDistance } from '~/utils';
 import { createBaseProvider } from '../create-base-provider';
 import type {
@@ -27,6 +27,29 @@ const glazeWmProviderConfigSchema = z.object({
   type: z.literal('glazewm'),
 });
 
+
+async function resolveGlazeWmIpcPort(): Promise<number> {
+  const DEFAULT_PORT = 6123;
+  try {
+    // GlazeWM writes ~/.glzr/glazewm/ipc.port when bound off the default
+    // (ghost LISTENING on 6123). Official WmClient defaults to 6123 only.
+    const result = await shellExec('cmd', [
+      '/d',
+      '/s',
+      '/c',
+      'if exist "%USERPROFILE%\.glzr\glazewm\ipc.port" (type "%USERPROFILE%\.glzr\glazewm\ipc.port")',
+    ]);
+    const raw = String(result.stdout ?? '').trim();
+    const port = Number.parseInt(raw, 10);
+    if (Number.isFinite(port) && port > 0) {
+      return port;
+    }
+  } catch {
+    // Missing shell permission or file: fall back to default.
+  }
+  return DEFAULT_PORT;
+}
+
 export function createGlazeWmProvider(
   config: GlazeWmProviderConfig,
 ): GlazeWmProvider {
@@ -34,7 +57,8 @@ export function createGlazeWmProvider(
 
   return createBaseProvider(mergedConfig, async queue => {
     const monitors = await getMonitors();
-    const client = new WmClient();
+    const port = await resolveGlazeWmIpcPort();
+    const client = new WmClient({ port });
     let unlistenEvents: null | UnlistenFn = null;
 
     client.onDisconnect(() =>
