@@ -41,6 +41,19 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+export function isGlazeWmProviderGenerationActive(
+  disposed: boolean,
+  expectedGeneration: number,
+  currentGeneration: number,
+  clientIsCurrent: boolean,
+): boolean {
+  return (
+    !disposed &&
+    expectedGeneration === currentGeneration &&
+    clientIsCurrent
+  );
+}
+
 export function createGlazeWmProvider(
   config: GlazeWmProviderConfig,
 ): GlazeWmProvider {
@@ -60,7 +73,12 @@ export function createGlazeWmProvider(
     let unlistenEvents: null | UnlistenFn = null;
 
     function isActive(gen: number): boolean {
-      return !disposed && gen === generation;
+      return isGlazeWmProviderGenerationActive(
+        disposed,
+        gen,
+        generation,
+        true,
+      );
     }
 
     async function clearSubscription(): Promise<void> {
@@ -146,6 +164,9 @@ export function createGlazeWmProvider(
             case WmEventType.FOCUSED_CONTAINER_MOVED: {
               state = { ...state, focusedContainer: e.focusedContainer };
               state = { ...state, ...(await getMonitorState()) };
+              if (!isActive(gen) || client !== next) {
+                return;
+              }
               state = { ...state, ...(await getTilingDirectionState()) };
               break;
             }
@@ -176,6 +197,9 @@ export function createGlazeWmProvider(
             case WmEventType.WORKSPACE_DEACTIVATED:
             case WmEventType.WORKSPACE_UPDATED: {
               state = { ...state, ...(await getMonitorState()) };
+              if (!isActive(gen) || client !== next) {
+                return;
+              }
               state = { ...state, ...(await getTilingDirectionState()) };
               break;
             }
