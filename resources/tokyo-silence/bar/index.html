@@ -253,9 +253,45 @@
       }
 
       /**
-       * System statistics: CPU, Memory, Battery indicators
+       * Returns the title of the focused window in GlazeWM's focused
+       * workspace tree. Split containers can be nested, so follow the
+       * focused child until the window leaf is reached.
        */
-      function SystemStatsSection({ cpu, memory, battery, network }) {
+      function getFocusedWindowTitle(glazewm) {
+        let focusedWindow = glazewm?.focusedWorkspace?.children?.find(
+          (child) => child.hasFocus,
+        );
+        let depth = 0;
+
+        while (focusedWindow && focusedWindow.type !== 'window' && depth < 20) {
+          focusedWindow = focusedWindow.children?.find((child) => child.hasFocus);
+          depth += 1;
+        }
+
+        return focusedWindow?.type === 'window' && focusedWindow.title
+          ? focusedWindow.title
+          : '-';
+      }
+
+      /**
+       * The currently focused GlazeWM window title.
+       */
+      function FocusedWindowSection({ glazewm }) {
+        if (!glazewm) return null;
+
+        const title = getFocusedWindowTitle(glazewm);
+
+        return (
+          <div className="focused-window" title={title}>
+            {title}
+          </div>
+        );
+      }
+
+      /**
+       * System statistics and date/time indicators
+       */
+      function SystemStatsSection({ cpu, memory, battery, network, date }) {
         return (
           <>
             {/* Network/WiFi */}
@@ -288,6 +324,9 @@
                 </span>
               </div>
             )}
+
+            {/* Date/Time */}
+            {date && <div className="chip datetime">{date.formatted}</div>}
           </>
         );
       }
@@ -311,9 +350,9 @@
               <MediaSection media={output.media} />
             </div>
 
-            {/* Center: Date/Time */}
+            {/* Center: Focused Window */}
             <div className="center">
-              {output.date && <div className="datetime">{output.date.formatted}</div>}
+              <FocusedWindowSection glazewm={output.glazewm} />
             </div>
 
             {/* Right: System Info */}
@@ -323,6 +362,7 @@
                 memory={output.memory}
                 battery={output.battery}
                 network={output.network}
+                date={output.date}
               />
             </div>
           </div>

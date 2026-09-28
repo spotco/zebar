@@ -66,6 +66,7 @@ body,
   display: flex;
   align-items: center;
   justify-content: center;
+  min-width: 0;
 }
 
 /* Right section */
@@ -120,6 +121,21 @@ body,
   font-weight: 500;
   line-height: 1;
   height: var(--bar-item-height);
+  display: flex;
+  align-items: center;
+  padding-top: 4px;
+}
+
+/* Focused window title */
+.focused-window {
+  color: var(--fg);
+  font-weight: 500;
+  line-height: 1;
+  height: var(--bar-item-height);
+  max-width: min(40vw, 520px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   display: flex;
   align-items: center;
   padding-top: 4px;
