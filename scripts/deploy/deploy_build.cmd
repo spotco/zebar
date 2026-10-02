@@ -3,7 +3,7 @@ setlocal EnableExtensions
 set "INSTALL=C:\Program Files\glzr.io\Zebar"
 set "REL=F:\dev\zebar\target\release"
 set "RES_SRC=F:\dev\zebar\packages\desktop\resources"
-set "PACK_SRC=F:\dev\zebar\resources\tokyo-silence"
+set "PACK_SRC=F:\dev\zebar\resources\spotcobuild-zebar-theme"
 set "REPO=F:\dev\zebar"
 
 if /I "%~1"=="--help" goto :usage
@@ -43,10 +43,17 @@ if exist "%RES_SRC%\initialization-script.js" (
 rem Tauri's Windows bundle resolves BaseDirectory::Resource to this nested
 rem path. Keep the drop-in deploy equivalent to installing the MSI by copying
 rem the embedded default pack there as well as the executable.
-set "PACK_DST=%INSTALL%\_up_\_up_\resources\tokyo-silence"
+set "PACK_DST=%INSTALL%\_up_\_up_\resources\spotcobuild-zebar-theme"
 if not exist "%INSTALL%\_up_\_up_\resources\" mkdir "%INSTALL%\_up_\_up_\resources"
 echo Copying vendored pack -^> "%PACK_DST%"
 robocopy "%PACK_SRC%" "%PACK_DST%" /E /COPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS /NP >nul
+if errorlevel 8 goto :copyfail
+
+rem Also sync live user custom-pack folder used at runtime.
+set "USER_PACK=%USERPROFILE%\.glzr\zebar\spotcobuild-zebar-theme"
+if not exist "%USERPROFILE%\.glzr\zebar\" mkdir "%USERPROFILE%\.glzr\zebar"
+echo Copying live custom pack -^> "%USER_PACK%"
+robocopy "%PACK_SRC%" "%USER_PACK%" /E /COPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS /NP >nul
 if errorlevel 8 goto :copyfail
 
 echo.
@@ -59,7 +66,7 @@ echo   "%REPO%\scripts\deploy\start_zebar.cmd"
 echo Never: start C:\Program Files\...  (unquoted -^> C:\Program popup)
 if "%START_AFTER%"=="1" (
   echo Starting spotcobuild Zebar bar...
-  start "" "%INSTALL%\zebar.exe" start-widget-preset --pack spotco.tokyo-silence --widget-name bar --preset default
+  start "" "%INSTALL%\zebar.exe" start-widget-preset --pack spotcobuild-zebar-theme --widget-name bar --preset default
 )
 exit /b 0
 
@@ -73,6 +80,7 @@ exit /b 1
 :usage
 echo Usage: deploy_build.cmd [--start]
 echo Copies release zebar.exe, desktop resources, and the vendored pack from %REL% into %INSTALL%
-echo --start also launches the spotco.tokyo-silence bar after deployment.
+echo Also syncs %%USERPROFILE%%\.glzr\zebar\spotcobuild-zebar-theme\
+echo --start also launches the spotcobuild-zebar-theme bar after deployment.
 echo Requires one-time grant_install_write_access.cmd
 exit /b 0

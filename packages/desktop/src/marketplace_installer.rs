@@ -20,9 +20,15 @@ use crate::{
   widget_pack::{WidgetPack, WidgetPackConfig, WidgetPackManager},
 };
 
-/// The ID of the built-in starter pack.
-/// Spotcobuild default bar pack (vendored tokyo-silence fork).
-pub const STARTER_PACK_ID: &str = "spotco.tokyo-silence";
+/// Spotcobuild default bar pack id / local folder under `.glzr/zebar`.
+pub const STARTER_PACK_ID: &str = "spotcobuild-zebar-theme";
+
+/// Built-in fallback pack when the local spotcobuild theme folder is missing.
+pub const FALLBACK_PACK_ID: &str = "starter";
+
+/// Fallback widget/preset inside the built-in starter pack (GlazeWM).
+pub const FALLBACK_WIDGET_NAME: &str = "with-glazewm";
+pub const FALLBACK_PRESET_NAME: &str = "default";
 
 /// Metadata about an installed marketplace widget pack.
 ///
@@ -85,9 +91,9 @@ impl MarketplaceInstaller {
       installed_tx,
     };
 
-    // Keep the embedded spotcobuild pack current for existing installs
-    // too. The settings file remains user-owned; only the embedded
-    // pack copy is refreshed when its version/revision changes.
+    // Keep the local spotcobuild theme pack current under `.glzr/zebar`
+    // (custom pack folder). Settings remain user-owned; only the pack
+    // directory is refreshed when version/revision changes.
     installer.install_starter_pack_if_needed()?;
 
     Ok((Arc::new(installer), installed_rx))
@@ -98,6 +104,10 @@ impl MarketplaceInstaller {
   pub fn installed_packs_metadata(
     &self,
   ) -> anyhow::Result<Vec<MarketplacePackMetadata>> {
+    if !self.app_settings.marketplace_meta_dir.is_dir() {
+      return Ok(Vec::new());
+    }
+
     let packs_metadata =
       fs::read_dir(&self.app_settings.marketplace_meta_dir)?
         .filter_map(|entry| {
@@ -206,64 +216,92 @@ impl MarketplaceInstaller {
   }
 
   /// Installs or refreshes the spotcobuild default pack from the embedded
-  /// `tokyo-silence` resource (`spotco.tokyo-silence`).
+  /// `spotcobuild-zebar-theme` resource into
+  /// `%USERPROFILE%/.glzr/zebar/spotcobuild-zebar-theme/` (custom pack).
+  ///
+  /// Does not write `.marketplace` metadata or AppData downloads.
+  /// If the embedded theme cannot be installed, copies the built-in
+  /// `starter` pack as a local fallback.
   fn install_starter_pack_if_needed(&self) -> anyhow::Result<()> {
-    let starter_pack_dir = self
+    let default_result = self.install_default_theme_pack();
+
+    // Always keep built-in starter available for missing-folder fallback.
+    if let Err(err) = self.install_fallback_starter_pack() {
+      tracing::warn!(
+        "Could not install built-in {FALLBACK_PACK_ID} fallback pack: {err:#}"
+      );
+    }
+
+    match default_result {
+      Ok(()) => Ok(()),
+      Err(err) => {
+        tracing::error!(
+          "Failed to install {STARTER_PACK_ID} from embedded resources: {err:#}. Will use built-in {FALLBACK_PACK_ID} if selected pack is missing."
+        );
+        Ok(())
+      }
+    }
+  }
+
+  fn install_default_theme_pack(&self) -> anyhow::Result<()> {
+    let source_dir = self
       .app_handle
       .path()
-      .resolve("../../resources/tokyo-silence", BaseDirectory::Resource)
-      .context("Unable to resolve starter pack resource.")?;
+      .resolve(
+        "../../resources/spotcobuild-zebar-theme",
+        BaseDirectory::Resource,
+      )
+      .context("Unable to resolve spotcobuild-zebar-theme resource.")?;
 
+    self.refresh_local_pack_from_resource(&source_dir, STARTER_PACK_ID)
+  }
+
+  fn install_fallback_starter_pack(&self) -> anyhow::Result<()> {
+    let source_dir = self
+      .app_handle
+      .path()
+      .resolve("../../resources/starter", BaseDirectory::Resource)
+      .context("Unable to resolve built-in starter pack resource.")?;
+
+    self.refresh_local_pack_from_resource(&source_dir, FALLBACK_PACK_ID)
+  }
+
+  fn refresh_local_pack_from_resource(
+    &self,
+    source_dir: &Path,
+    pack_folder_name: &str,
+  ) -> anyhow::Result<()> {
     let pack_config = read_and_parse_json::<WidgetPackConfig>(
-      &starter_pack_dir.join("zpack.json"),
+      &source_dir.join("zpack.json"),
     )?;
 
-    let metadata_path = self
-      .app_settings
-      .marketplace_pack_metadata_path(STARTER_PACK_ID);
-    let installed_metadata = read_embedded_pack_metadata(&metadata_path);
+    let dest_dir = self.app_settings.config_dir.join(pack_folder_name);
+    let installed = read_local_pack_config(&dest_dir);
 
-    let dest_dir = self.app_settings.marketplace_pack_download_dir(
-      STARTER_PACK_ID,
-      &pack_config.version,
-    );
-
-    if !should_update_embedded_pack(
-      installed_metadata.as_ref(),
-      &pack_config,
-      dest_dir.is_dir(),
-    ) {
+    if !should_update_local_pack(installed.as_ref(), &pack_config) {
       return Ok(());
     }
 
-    refresh_embedded_pack(
-      &starter_pack_dir,
-      &dest_dir,
-      &metadata_path,
-      &pack_config,
-    )
+    refresh_local_pack(source_dir, &dest_dir, &pack_config)
   }
 }
 
-fn refresh_embedded_pack(
+fn refresh_local_pack(
   source_dir: &Path,
   destination_dir: &Path,
-  metadata_path: &Path,
   embedded_config: &WidgetPackConfig,
 ) -> anyhow::Result<()> {
-  refresh_embedded_pack_with_copy(
+  refresh_local_pack_with_copy(
     source_dir,
     destination_dir,
-    metadata_path,
     embedded_config,
     |source, destination| copy_dir_all(source, destination, true),
   )
 }
 
-fn refresh_embedded_pack_with_copy<F>(
+fn refresh_local_pack_with_copy<F>(
   source_dir: &Path,
   destination_dir: &Path,
-  metadata_path: &Path,
   embedded_config: &WidgetPackConfig,
   copy: F,
 ) -> anyhow::Result<()>
@@ -292,26 +330,6 @@ where
     }
 
     if let Err(error) = fs::rename(&staging_dir, destination_dir) {
-      if had_destination {
-        let _ = fs::rename(&backup_dir, destination_dir);
-      }
-      return Err(error.into());
-    }
-
-    let mut metadata = MarketplacePackMetadata::new(
-      STARTER_PACK_ID,
-      &embedded_config.version,
-    )?;
-    metadata.build_revision = embedded_config.build_revision.clone();
-
-    // Metadata is written only after the new pack is in place. If this
-    // fails, restore the prior directory so startup still has a usable
-    // pack.
-    if let Err(error) = fs::write(
-      metadata_path,
-      serde_json::to_string_pretty(&metadata)? + "\n",
-    ) {
-      let _ = remove_path(destination_dir);
       if had_destination {
         let _ = fs::rename(&backup_dir, destination_dir);
       }
@@ -348,34 +366,31 @@ fn remove_path(path: &Path) -> std::io::Result<()> {
   }
 }
 
-fn should_update_embedded_pack(
-  installed: Option<&MarketplacePackMetadata>,
+fn should_update_local_pack(
+  installed: Option<&WidgetPackConfig>,
   embedded: &WidgetPackConfig,
-  destination_exists: bool,
 ) -> bool {
   let Some(installed) = installed else {
     return true;
   };
 
-  installed.pack_id != STARTER_PACK_ID
+  installed.name != embedded.name
     || installed.version != embedded.version
     || installed.build_revision != embedded.build_revision
-    || !destination_exists
 }
 
-fn read_embedded_pack_metadata(
-  metadata_path: &Path,
-) -> Option<MarketplacePackMetadata> {
-  if !metadata_path.is_file() {
+fn read_local_pack_config(pack_dir: &Path) -> Option<WidgetPackConfig> {
+  let config_path = pack_dir.join("zpack.json");
+  if !config_path.is_file() {
     return None;
   }
 
-  match read_and_parse_json::<MarketplacePackMetadata>(metadata_path) {
-    Ok(metadata) => Some(metadata),
+  match read_and_parse_json::<WidgetPackConfig>(&config_path) {
+    Ok(config) => Some(config),
     Err(error) => {
       tracing::warn!(
-        "Ignoring malformed embedded-pack metadata at {}: {error:#}",
-        metadata_path.display()
+        "Ignoring malformed local pack at {}: {error:#}",
+        config_path.display()
       );
       None
     }
@@ -391,7 +406,7 @@ mod tests {
   fn embedded(version: &str, revision: Option<&str>) -> WidgetPackConfig {
     WidgetPackConfig {
       schema: None,
-      name: "tokyo-silence".into(),
+      name: STARTER_PACK_ID.into(),
       version: version.into(),
       build_revision: revision.map(str::to_string),
       description: String::new(),
@@ -402,79 +417,61 @@ mod tests {
     }
   }
 
-  fn metadata(
-    version: &str,
-    revision: Option<&str>,
-  ) -> MarketplacePackMetadata {
-    MarketplacePackMetadata {
-      pack_id: STARTER_PACK_ID.into(),
-      version: version.into(),
-      build_revision: revision.map(str::to_string),
-      installed_at: 0,
-    }
-  }
-
   #[test]
-  fn existing_older_embedded_pack_is_refreshed() {
-    assert!(should_update_embedded_pack(
-      Some(&metadata("1.0.0", Some("old"))),
+  fn existing_older_local_pack_is_refreshed() {
+    assert!(should_update_local_pack(
+      Some(&embedded("1.0.0", Some("old"))),
       &embedded("1.0.1", Some("new")),
-      true,
     ));
   }
 
   #[test]
-  fn matching_embedded_pack_is_not_recopied() {
-    assert!(!should_update_embedded_pack(
-      Some(&metadata("1.0.1", Some("new"))),
+  fn matching_local_pack_is_not_recopied() {
+    assert!(!should_update_local_pack(
+      Some(&embedded("1.0.1", Some("new"))),
       &embedded("1.0.1", Some("new")),
-      true,
     ));
   }
 
   #[test]
-  fn missing_embedded_pack_is_recreated() {
-    assert!(should_update_embedded_pack(
-      Some(&metadata("1.0.1", Some("new"))),
+  fn missing_local_pack_is_created() {
+    assert!(should_update_local_pack(
+      None,
       &embedded("1.0.1", Some("new")),
-      false,
     ));
   }
 
   #[test]
-  fn malformed_embedded_metadata_is_ignored() {
-    let path = std::env::temp_dir().join(format!(
-      "zebar-malformed-pack-metadata-{}.json",
+  fn malformed_local_pack_is_ignored() {
+    let root = std::env::temp_dir().join(format!(
+      "zebar-malformed-local-pack-{}",
       Uuid::new_v4()
     ));
-    fs::write(&path, "not json").expect("write malformed metadata");
+    fs::create_dir_all(&root).expect("create dir");
+    fs::write(root.join("zpack.json"), "not json").expect("write");
 
-    assert!(read_embedded_pack_metadata(&path).is_none());
-    fs::remove_file(path).expect("remove malformed metadata");
+    assert!(read_local_pack_config(&root).is_none());
+    fs::remove_dir_all(root).expect("cleanup");
   }
 
   #[test]
-  fn failed_embedded_pack_copy_preserves_existing_install() {
+  fn failed_local_pack_copy_preserves_existing_install() {
     let root = std::env::temp_dir()
       .join(format!("zebar-pack-refresh-failure-{}", Uuid::new_v4()));
-    let destination = root.join("spotco.tokyo-silence@1.0.1");
-    let metadata_path = root.join("spotco.tokyo-silence.json");
+    let destination = root.join(STARTER_PACK_ID);
     fs::create_dir_all(&destination).expect("create old pack");
     fs::write(destination.join("old.txt"), "keep me")
       .expect("write old pack");
-
-    let old_metadata = metadata("1.0.1", Some("old"));
     fs::write(
-      &metadata_path,
-      serde_json::to_string_pretty(&old_metadata)
-        .expect("serialize metadata"),
+      destination.join("zpack.json"),
+      serde_json::to_string_pretty(&embedded("1.0.1", Some("old")))
+        .expect("serialize"),
     )
-    .expect("write old metadata");
+    .expect("write old zpack");
 
-    let result = refresh_embedded_pack_with_copy(
+    let result = refresh_local_pack_with_copy(
       Path::new("missing-source"),
       &destination,
-      &metadata_path,
       &embedded("1.0.1", Some("new")),
       |_, _| Err(anyhow::anyhow!("simulated copy failure")),
     );
@@ -485,8 +482,8 @@ mod tests {
       "keep me"
     );
     assert_eq!(
-      read_and_parse_json::<MarketplacePackMetadata>(&metadata_path)
-        .expect("old metadata")
+      read_and_parse_json::<WidgetPackConfig>(&destination.join("zpack.json"))
+        .expect("old zpack")
         .build_revision,
       Some("old".into())
     );

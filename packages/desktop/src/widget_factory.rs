@@ -573,6 +573,9 @@ impl WidgetFactory {
   }
 
   /// Opens presets that are configured to be launched on startup.
+  ///
+  /// If a configured pack is missing (e.g. `spotcobuild-zebar-theme`
+  /// folder deleted), falls back to the built-in `starter` pack.
   pub async fn startup(&self) -> anyhow::Result<()> {
     let startup_configs = self.app_settings.startup_configs().await;
 
@@ -581,12 +584,45 @@ impl WidgetFactory {
         .start_widget_by_id(
           &startup_config.pack,
           &startup_config.widget,
-          &WidgetOpenOptions::Preset(startup_config.preset),
+          &WidgetOpenOptions::Preset(startup_config.preset.clone()),
           false,
         )
         .await
       {
         tracing::error!("Failed to start widget on startup: {:?}", err);
+
+        let pack_missing = self
+          .widget_pack_manager
+          .widget_pack_by_id(&startup_config.pack)
+          .await
+          .is_none();
+
+        if pack_missing {
+          tracing::warn!(
+            "Pack '{}' missing; falling back to built-in '{}' / '{}'.",
+            startup_config.pack,
+            crate::marketplace_installer::FALLBACK_PACK_ID,
+            crate::marketplace_installer::FALLBACK_WIDGET_NAME,
+          );
+
+          if let Err(fb_err) = self
+            .start_widget_by_id(
+              crate::marketplace_installer::FALLBACK_PACK_ID,
+              crate::marketplace_installer::FALLBACK_WIDGET_NAME,
+              &WidgetOpenOptions::Preset(
+                crate::marketplace_installer::FALLBACK_PRESET_NAME
+                  .to_string(),
+              ),
+              false,
+            )
+            .await
+          {
+            tracing::error!(
+              "Fallback starter theme also failed to start: {:?}",
+              fb_err
+            );
+          }
+        }
       }
     }
 

@@ -180,7 +180,7 @@ impl AppSettings {
   /// Initializes app settings to the given path.
   ///
   /// `settings.json` is initialized with the fork's embedded default pack
-  /// (`spotco.tokyo-silence` / `bar`).
+  /// (`spotcobuild-zebar-theme` / `bar`).
   fn create_default(config_dir: &Path) -> anyhow::Result<()> {
     tracing::info!("Initializing app settings from default.",);
 
@@ -191,7 +191,7 @@ impl AppSettings {
       )),
       startup_configs: vec![StartupConfig {
         pack: STARTER_PACK_ID.into(),
-        // tokyo-silence only ships the `bar` widget.
+        // spotcobuild-zebar-theme only ships the `bar` widget.
         widget: "bar".into(),
         preset: "default".into(),
       }],

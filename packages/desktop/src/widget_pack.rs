@@ -452,7 +452,14 @@ impl WidgetPackManager {
         )
       })?
       .filter_map(|entry| Some(entry.ok()?.path()))
-      .filter(|path| path.is_dir());
+      .filter(|path| {
+        path.is_dir()
+          && path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| !n.starts_with('.'))
+            .unwrap_or(false)
+      });
 
     let mut packs = HashMap::new();
 
