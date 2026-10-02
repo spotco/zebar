@@ -13,7 +13,9 @@ set "TEMP_DIR=%CD%\Temp"
 set "STAGE=%TEMP_DIR%\zebar-%VERSION%-%STAMP%"
 set "ZIP=%TEMP_DIR%\zebar-%VERSION%-%STAMP%.zip"
 set "RELEASE_DIR=%CD%\target\release"
+REM FULL vendored pack from resources\ (reproducible; not a marketplace stub / not live %%USERPROFILE%%\.glzr\zebar\ copy)
 set "PACK_SRC=%CD%\resources\spotcobuild-zebar-theme"
+REM Repo starter settings.json (points at spotcobuild-zebar-theme). Zebar has no config.yaml (GlazeWM-only).
 set "SETTINGS_SRC=%CD%\resources\spotcobuild\settings.json"
 
 echo ========================================
