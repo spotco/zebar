@@ -11,7 +11,7 @@ const repoDir = path.resolve(packageDir, '../..');
 const entryPoint = path.join(packageDir, 'src/index.ts');
 const outputPath = path.join(
   repoDir,
-  'resources/tokyo-silence/bar/js/zebar-local.js',
+  'resources/spotcobuild-zebar-theme/bar/js/zebar-local.js',
 );
 const checkOnly = process.argv.includes('--check');
 
@@ -32,7 +32,7 @@ if (checkOnly) {
       `Stale vendored bundle: ${path.relative(repoDir, outputPath)}`,
     );
     console.error(
-      'Run pnpm --filter zebar bundle:tokyo-silence to regenerate it.',
+      'Run pnpm --filter zebar bundle:spotcobuild-theme to regenerate it.',
     );
     process.exitCode = 1;
   }

@@ -1,9 +1,5 @@
 import { Button, cn, ResizablePanel, Separator } from '@glzr/components';
-import {
-  IconChevronsLeft,
-  IconHome,
-  IconWorldSearch,
-} from '@tabler/icons-solidjs';
+import { IconChevronsLeft, IconHome } from '@tabler/icons-solidjs';
 import { createSignal, For } from 'solid-js';
 
 import { useUserPacks } from '~/common';
@@ -64,15 +60,6 @@ export function Sidebar(props: SidebarProps) {
         href="/"
       >
         <div class="truncate">My widgets</div>
-      </SidebarItem>
-
-      <SidebarItem
-        isCollapsed={isCollapsed()}
-        icon={<IconWorldSearch class="size-6" />}
-        tooltip="Marketplace"
-        href="/marketplace"
-      >
-        <div class="truncate">Marketplace</div>
       </SidebarItem>
 
       {!isCollapsed() && (

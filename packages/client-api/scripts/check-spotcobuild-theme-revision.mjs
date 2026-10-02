@@ -8,7 +8,7 @@ const packageDir = path.resolve(
   '..',
 );
 const repoDir = path.resolve(packageDir, '../..');
-const packDir = path.join(repoDir, 'resources/tokyo-silence');
+const packDir = path.join(repoDir, 'resources/spotcobuild-zebar-theme');
 const packConfigPath = path.join(packDir, 'zpack.json');
 const checkOnly = process.argv.includes('--check');
 
@@ -48,7 +48,7 @@ if (checkOnly) {
       `Stale embedded pack revision: expected ${expectedRevision}, found ${packConfig.buildRevision ?? '<missing>'}`,
     );
     console.error(
-      'Run pnpm --filter zebar pack:tokyo-silence:revision to update zpack.json.',
+      'Run pnpm --filter zebar pack:spotcobuild-theme:revision to update zpack.json.',
     );
     process.exitCode = 1;
   }

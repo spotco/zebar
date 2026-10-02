@@ -29,7 +29,6 @@ enum MenuEvent {
   ShowConfigFolder,
   ReloadConfigs,
   OpenSettings,
-  BrowseWidgets,
   Exit,
   EditWidgetPack {
     pack_id: String,
@@ -58,7 +57,6 @@ impl Display for MenuEvent {
       MenuEvent::ShowConfigFolder => write!(f, "show_config_folder"),
       MenuEvent::ReloadConfigs => write!(f, "reload_configs"),
       MenuEvent::OpenSettings => write!(f, "open_settings"),
-      MenuEvent::BrowseWidgets => write!(f, "browse_widgets"),
       MenuEvent::Exit => write!(f, "exit"),
       MenuEvent::EditWidgetPack { pack_id } => {
         write!(f, "edit_widget_pack_{}", pack_id)
@@ -107,7 +105,6 @@ impl FromStr for MenuEvent {
       ["show", "config", "folder"] => Ok(Self::ShowConfigFolder),
       ["reload", "configs"] => Ok(Self::ReloadConfigs),
       ["open", "settings"] => Ok(Self::OpenSettings),
-      ["browse", "widgets"] => Ok(Self::BrowseWidgets),
       ["exit"] => Ok(Self::Exit),
       ["edit", "widget", "pack", pack_id] => Ok(Self::EditWidgetPack {
         pack_id: pack_id.to_string(),
@@ -146,7 +143,6 @@ enum SettingsRoute {
     pack_id: String,
     widget_name: String,
   },
-  Marketplace,
 }
 
 /// System tray icon for Zebar.
@@ -274,7 +270,6 @@ impl SysTray {
 
     let mut tray_menu = MenuBuilder::new(&self.app_handle)
       .text(MenuEvent::OpenSettings, "Open settings")
-      .text(MenuEvent::BrowseWidgets, "Browse widgets...")
       .item(&configs_menu)
       .text(MenuEvent::ReloadConfigs, {
         #[cfg(windows)]
@@ -357,10 +352,6 @@ impl SysTray {
         MenuEvent::OpenSettings => {
           Self::open_settings_window(&app_handle, SettingsRoute::Index)
         }
-        MenuEvent::BrowseWidgets => Self::open_settings_window(
-          &app_handle,
-          SettingsRoute::Marketplace,
-        ),
         MenuEvent::Exit => {
           app_handle.exit(0);
           Ok(())
@@ -450,7 +441,6 @@ impl SysTray {
       } => {
         format!("/index.html#/packs/{}/{}", pack_id, widget_name)
       }
-      SettingsRoute::Marketplace => "/index.html#/marketplace".to_string(),
     };
 
     match &settings_window {

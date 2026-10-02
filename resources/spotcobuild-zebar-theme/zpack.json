@@ -1,9 +1,9 @@
 {
   "$schema": "https://github.com/glzr-io/zebar/raw/v3.2.0/resources/zpack-schema.json",
-  "name": "tokyo-silence",
+  "name": "spotcobuild-zebar-theme",
   "version": "1.0.1",
-  "buildRevision": "spotcobuild-content-ef2eb2f520f0d717",
-  "description": "spotco fork of y4m3/tokyo-silence for GlazeWM spotcobuild (global tiling direction chip). Original theme MIT by y4m3.",
+  "buildRevision": "spotcobuild-content-f16df34f7367f709",
+  "description": "spotcobuild Zebar theme (fork of y4m3/tokyo-silence for GlazeWM spotcobuild). Original theme MIT by y4m3.",
   "tags": [
     "Tokyo Silence",
     "Tokyo Night",

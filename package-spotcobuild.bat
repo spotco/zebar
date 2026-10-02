@@ -13,7 +13,9 @@ set "TEMP_DIR=%CD%\Temp"
 set "STAGE=%TEMP_DIR%\zebar-%VERSION%-%STAMP%"
 set "ZIP=%TEMP_DIR%\zebar-%VERSION%-%STAMP%.zip"
 set "RELEASE_DIR=%CD%\target\release"
-set "PACK_SRC=%CD%\resources\tokyo-silence"
+REM FULL vendored pack from resources\ (reproducible; not a marketplace stub / not live %%USERPROFILE%%\.glzr\zebar\ copy)
+set "PACK_SRC=%CD%\resources\spotcobuild-zebar-theme"
+REM Repo starter settings.json (points at spotcobuild-zebar-theme). Zebar has no config.yaml (GlazeWM-only).
 set "SETTINGS_SRC=%CD%\resources\spotcobuild\settings.json"
 
 echo ========================================
@@ -60,8 +62,8 @@ echo Copying settings.json...
 copy /y "%SETTINGS_SRC%" "%STAGE%\settings.json" >nul
 if errorlevel 1 exit /b 1
 
-echo Copying spotco.tokyo-silence@1.0.1...
-robocopy "%PACK_SRC%" "%STAGE%\spotco.tokyo-silence@1.0.1" /E /COPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS /NP >nul
+echo Copying spotcobuild-zebar-theme...
+robocopy "%PACK_SRC%" "%STAGE%\spotcobuild-zebar-theme" /E /COPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS /NP >nul
 if errorlevel 8 (
   echo ERROR: failed to copy the tracked widget pack.
   exit /b 1
@@ -79,10 +81,10 @@ echo   %ZIP%
 echo Contents:
 echo   zebar.exe
 echo   settings.json
-echo   spotco.tokyo-silence@1.0.1\
+echo   spotcobuild-zebar-theme\
 echo.
 echo Install destinations on a stock GlazeWM/Zebar machine:
-echo   zebar.exe       -^> C:\Program Files\glzr.io\Zebar\zebar.exe
-echo   settings.json   -^> %%USERPROFILE%%\.glzr\zebar\settings.json
-echo   widget pack     -^> %%APPDATA%%\zebar\downloads\spotco.tokyo-silence@1.0.1\
+echo   zebar.exe                    -^> C:\Program Files\glzr.io\Zebar\zebar.exe
+echo   settings.json                -^> %%USERPROFILE%%\.glzr\zebar\settings.json
+echo   spotcobuild-zebar-theme\     -^> %%USERPROFILE%%\.glzr\zebar\spotcobuild-zebar-theme\
 exit /b 0

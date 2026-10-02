@@ -105,13 +105,13 @@ if not "!EC!"=="0" (
 echo OK: dependencies>> "%LOG%"
 
 echo.
-echo [2/5] pnpm --filter zebar bundle:tokyo-silence:check
+echo [2/5] pnpm --filter zebar bundle:spotcobuild-theme:check
 echo -----
 echo [2/5] vendored bundle check>> "%LOG%"
-call pnpm --filter zebar bundle:tokyo-silence:check
+call pnpm --filter zebar bundle:spotcobuild-theme:check
 set "EC=!ERRORLEVEL!"
 if not "!EC!"=="0" (
-  echo ERROR: vendored tokyo-silence bundle is stale.
+  echo ERROR: vendored spotcobuild-zebar-theme bundle is stale.
   echo ERROR: vendored bundle check failed>> "%LOG%"
   echo.
   if not defined BUILD_BAT_NOPAUSE pause
@@ -120,13 +120,13 @@ if not "!EC!"=="0" (
 echo OK: vendored bundle>> "%LOG%"
 
 echo.
-echo [3/5] pnpm --filter zebar pack:tokyo-silence:revision:check
+echo [3/5] pnpm --filter zebar pack:spotcobuild-theme:revision:check
 echo -----
 echo [3/5] embedded pack revision check>> "%LOG%"
-call pnpm --filter zebar pack:tokyo-silence:revision:check
+call pnpm --filter zebar pack:spotcobuild-theme:revision:check
 set "EC=!ERRORLEVEL!"
 if not "!EC!"=="0" (
-  echo ERROR: embedded tokyo-silence pack revision is stale.
+  echo ERROR: embedded spotcobuild-zebar-theme pack revision is stale.
   echo ERROR: embedded pack revision check failed>> "%LOG%"
   echo.
   if not defined BUILD_BAT_NOPAUSE pause
